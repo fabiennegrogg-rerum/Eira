@@ -707,7 +707,7 @@
 // CONFIG
 // ============================================================
 const API_KEY = 'AIzaSyCg78COwFI-j_vbM4ychrgMv78ArRGXPBw';
-const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyiWiX9Hrh6r0BAl2TohqcCTISaqXaC_57i3eEgM5-z3HzPlxZiWZwBzPL6djkCGpcP/exec';
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyPtSRrjtkhA6akA1qqRUMUuYBtjqeEqaHws6TegXHPQhyEeQK-9hPqr-hT0FImqLpX/exec';
 const SHEETS = {
   foods:         '1h59YPkiStd4xFDClRowrT6PEKVMRDYjOazdbS8nG1nk',
   logs:          '1hUZunGh1APo8ky40jO--6VPpG4Re7wwhb4lGjahGzyM',
@@ -1006,11 +1006,12 @@ function renderFoods(filter='') {
   let html = '';
   filtered.forEach(f => {
     html += `<div class="food-list-item">
-      <div class="food-info">
+      <div class="food-info" style="flex:1;">
         <div class="food-name">${f.name||'–'}</div>
         <div class="food-meta">${f.category||''} · P: ${f.protein_g||0}g · KH: ${f.carb_g||0}g · F: ${f.fat_g||0}g</div>
       </div>
-      <div class="food-fiber-badge">${f.fiber_g||0}g 🌿</div>
+      <div class="food-fiber-badge" style="margin-right:8px;">${f.fiber_g||0}g 🌿</div>
+      <button onclick="showEditFoodModal('${f.food_id}')" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:11px;color:var(--text2);cursor:pointer;">✏️</button>
     </div>`;
   });
   document.getElementById('foodsContent').innerHTML = html;
@@ -1031,11 +1032,16 @@ function renderRecipes() {
     const items = state.recipeItems.filter(ri => ri.recipe_id === r.recipe_id);
     html += `<div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;">
-        <div>
+        <div style="flex:1;">
           <div style="font-weight:600;font-size:15px;">${r.name||'–'}</div>
           <div style="font-size:12px;color:var(--text2);margin-top:3px;">${r.serving_yield||1} Portion(en) · ${items.length} Zutaten ${r.season_tag ? '· '+r.season_tag : ''}</div>
         </div>
-        ${r.is_favorite==='TRUE' ? '<span style="color:var(--accent2);">★</span>' : ''}
+        <div style="display:flex;align-items:center;gap:6px;">
+          ${r.is_favorite==='TRUE' ? '<span style="color:var(--accent2);">★</span>' : ''}
+          <button onclick="showEditRecipeModal('${r.recipe_id}')" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:11px;color:var(--text2);cursor:pointer;">✏️</button>
+          <button onclick="duplicateRecipe('${r.recipe_id}')" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:11px;color:var(--text2);cursor:pointer;">⧉</button>
+          <button onclick="deleteRecipe('${r.recipe_id}','${r.name}')" style="background:rgba(245,122,122,0.1);border:1px solid rgba(245,122,122,0.3);border-radius:6px;padding:4px 8px;font-size:11px;color:var(--danger);cursor:pointer;">🗑️</button>
+        </div>
       </div>
       ${r.notes ? `<div style="font-size:12px;color:var(--text2);margin-top:8px;">${r.notes}</div>` : ''}
     </div>`;
@@ -1470,10 +1476,237 @@ document.querySelectorAll('.modal-overlay').forEach(overlay => {
 });
 
 // ============================================================
+// DELETE / DUPLICATE RECIPE
+// ============================================================
+async function deleteRecipe(recipeId, recipeName) {
+  if (!confirm(`Rezept "${recipeName}" wirklich löschen? Auch alle Zutaten werden gelöscht.`)) return;
+  try {
+    await fetch(APPS_SCRIPT_URL, {
+      method: 'POST', mode: 'no-cors',
+      headers: {'Content-Type':'text/plain'},
+      body: JSON.stringify({ action: 'deleteRecipe', recipeId })
+    });
+    state.recipes = state.recipes.filter(r => r.recipe_id !== recipeId);
+    state.recipeItems = state.recipeItems.filter(ri => ri.recipe_id !== recipeId);
+    renderRecipes();
+  } catch(e) {
+    alert('Fehler: ' + e.message);
+  }
+}
+
+async function duplicateRecipe(recipeId) {
+  const recipe = state.recipes.find(r => r.recipe_id === recipeId);
+  if (!recipe) return;
+  try {
+    await fetch(APPS_SCRIPT_URL, {
+      method: 'POST', mode: 'no-cors',
+      headers: {'Content-Type':'text/plain'},
+      body: JSON.stringify({ action: 'duplicateRecipe', recipeId })
+    });
+    // Add to local state with temp ID
+    const newId = 'RC-' + Date.now();
+    const newRecipe = { ...recipe, recipe_id: newId, name: recipe.name + ' (Kopie)' };
+    state.recipes.push(newRecipe);
+    const items = state.recipeItems.filter(ri => ri.recipe_id === recipeId);
+    items.forEach(ri => state.recipeItems.push({ ...ri, recipe_id: newId }));
+    renderRecipes();
+  } catch(e) {
+    alert('Fehler: ' + e.message);
+  }
+}
+
+// ============================================================
+// EDIT FOOD
+// ============================================================
+function showEditFoodModal(foodId) {
+  const food = state.foods.find(f => f.food_id === foodId);
+  if (!food) return;
+  document.getElementById('editFoodId').value = foodId;
+  document.getElementById('editFoodName').value = food.name || '';
+  document.getElementById('editFoodProtein').value = food.protein_g || '';
+  document.getElementById('editFoodCarb').value = food.carb_g || '';
+  document.getElementById('editFoodFat').value = food.fat_g || '';
+  document.getElementById('editFoodFiber').value = food.fiber_g || '';
+  document.getElementById('editFoodVitC').value = food.vitamin_c_mg || '';
+  document.getElementById('editFoodIron').value = food.iron_mg || '';
+  document.getElementById('editFoodPortion').value = food.portion_def || food.portion_default || '';
+  document.getElementById('editFoodMin').value = food.portion_min || '';
+  document.getElementById('editFoodMax').value = food.portion_max || '';
+  const catSelect = document.getElementById('editFoodCategory');
+  for (let i = 0; i < catSelect.options.length; i++) {
+    if (catSelect.options[i].value === food.category) { catSelect.selectedIndex = i; break; }
+  }
+  openModal('editFoodModal');
+}
+
+async function saveEditFood() {
+  const foodId = document.getElementById('editFoodId').value;
+  const fields = {
+    name: document.getElementById('editFoodName').value,
+    category: document.getElementById('editFoodCategory').value,
+    protein_g: document.getElementById('editFoodProtein').value,
+    carb_g: document.getElementById('editFoodCarb').value,
+    fat_g: document.getElementById('editFoodFat').value,
+    fiber_g: document.getElementById('editFoodFiber').value,
+    vitamin_c_mg: document.getElementById('editFoodVitC').value,
+    iron_mg: document.getElementById('editFoodIron').value,
+    portion_def: document.getElementById('editFoodPortion').value,
+    portion_min: document.getElementById('editFoodMin').value,
+    portion_max: document.getElementById('editFoodMax').value,
+  };
+  try {
+    await fetch(APPS_SCRIPT_URL, {
+      method: 'POST', mode: 'no-cors',
+      headers: {'Content-Type':'text/plain'},
+      body: JSON.stringify({ action: 'updateFood', foodId, fields })
+    });
+    // Update in place
+    const idx = state.foods.findIndex(f => f.food_id === foodId);
+    if (idx >= 0) {
+      state.foods[idx] = { ...state.foods[idx], ...fields };
+    }
+    closeModal('editFoodModal');
+    renderFoods();
+  } catch(e) {
+    alert('Fehler: ' + e.message);
+  }
+}
+
+// ============================================================
+// EDIT RECIPE
+// ============================================================
+function showEditRecipeModal(recipeId) {
+  const recipe = state.recipes.find(r => r.recipe_id === recipeId);
+  if (!recipe) return;
+  document.getElementById('editRecipeId').value = recipeId;
+  document.getElementById('editRecipeName').value = recipe.name || '';
+  document.getElementById('editRecipeServings').value = recipe.serving_yield || 1;
+  document.getElementById('editRecipeNotes').value = recipe.notes || '';
+  document.getElementById('editRecipeFav').value = recipe.is_favorite === 'TRUE' ? 'TRUE' : 'FALSE';
+  const seasonSelect = document.getElementById('editRecipeSeason');
+  for (let i = 0; i < seasonSelect.options.length; i++) {
+    if (seasonSelect.options[i].value === recipe.season_tag) { seasonSelect.selectedIndex = i; break; }
+  }
+  openModal('editRecipeModal');
+}
+
+async function saveEditRecipe() {
+  const recipeId = document.getElementById('editRecipeId').value;
+  const fields = {
+    name: document.getElementById('editRecipeName').value,
+    serving_yield: document.getElementById('editRecipeServings').value,
+    notes: document.getElementById('editRecipeNotes').value,
+    season_tag: document.getElementById('editRecipeSeason').value,
+    is_favorite: document.getElementById('editRecipeFav').value,
+  };
+  try {
+    await fetch(APPS_SCRIPT_URL, {
+      method: 'POST', mode: 'no-cors',
+      headers: {'Content-Type':'text/plain'},
+      body: JSON.stringify({ action: 'updateRecipe', recipeId, fields })
+    });
+    // Update in place - find index and replace fields
+    const idx = state.recipes.findIndex(r => r.recipe_id === recipeId);
+    if (idx >= 0) {
+      state.recipes[idx] = { ...state.recipes[idx], ...fields };
+    }
+    closeModal('editRecipeModal');
+    renderRecipes();
+  } catch(e) {
+    alert('Fehler: ' + e.message);
+  }
+}
+
+// ============================================================
 // INIT
 // ============================================================
 document.querySelector('.header-date') && (document.querySelector('.header-date').textContent = today);
 loadAll();
 </script>
+<!-- Modal: Edit Food -->
+<div class="modal-overlay" id="editFoodModal">
+  <div class="modal" style="position:relative;">
+    <div class="modal-handle"></div>
+    <button class="modal-close" onclick="closeModal('editFoodModal')">✕</button>
+    <div class="modal-title">Lebensmittel bearbeiten</div>
+    <div class="form-group">
+      <label class="form-label">Name</label>
+      <input class="form-input" id="editFoodName" placeholder="Name">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Kategorie</label>
+      <select class="form-select" id="editFoodCategory">
+        <option>Gemüse</option><option>Obst</option><option>Getreide</option>
+        <option>Hülsenfrüchte</option><option>Fleisch</option><option>Fisch</option>
+        <option>Milchprodukt</option><option>Ei</option><option>Nüsse & Samen</option>
+        <option>Öl & Fett</option><option>Gewürze</option><option>Getränke</option><option>Sonstiges</option>
+      </select>
+    </div>
+    <div style="font-size:13px;color:var(--text2);margin-bottom:10px;">Nährwerte pro 100g:</div>
+    <div class="row">
+      <div class="form-group"><label class="form-label">Protein (g)</label><input class="form-input" id="editFoodProtein" type="number" step="0.1"></div>
+      <div class="form-group"><label class="form-label">Kohlenhydrate (g)</label><input class="form-input" id="editFoodCarb" type="number" step="0.1"></div>
+    </div>
+    <div class="row">
+      <div class="form-group"><label class="form-label">Fett (g)</label><input class="form-input" id="editFoodFat" type="number" step="0.1"></div>
+      <div class="form-group"><label class="form-label">Ballaststoffe (g)</label><input class="form-input" id="editFoodFiber" type="number" step="0.1" style="border-color:var(--accent)"></div>
+    </div>
+    <div class="row">
+      <div class="form-group"><label class="form-label">Vitamin C (mg)</label><input class="form-input" id="editFoodVitC" type="number" step="0.1"></div>
+      <div class="form-group"><label class="form-label">Eisen (mg)</label><input class="form-input" id="editFoodIron" type="number" step="0.1"></div>
+    </div>
+    <div class="row">
+      <div class="form-group"><label class="form-label">Std. Portion (g)</label><input class="form-input" id="editFoodPortion" type="number"></div>
+      <div class="form-group"><label class="form-label">Min / Max</label>
+        <div style="display:flex;gap:6px;">
+          <input class="form-input" id="editFoodMin" type="number" placeholder="Min" style="padding:12px 8px;">
+          <input class="form-input" id="editFoodMax" type="number" placeholder="Max" style="padding:12px 8px;">
+        </div>
+      </div>
+    </div>
+    <input type="hidden" id="editFoodId">
+    <button class="btn btn-primary" onclick="saveEditFood()" style="margin-top:8px;">Speichern ✓</button>
+  </div>
+</div>
+
+<!-- Modal: Edit Recipe -->
+<div class="modal-overlay" id="editRecipeModal">
+  <div class="modal" style="position:relative;">
+    <div class="modal-handle"></div>
+    <button class="modal-close" onclick="closeModal('editRecipeModal')">✕</button>
+    <div class="modal-title">Rezept bearbeiten</div>
+    <div class="form-group">
+      <label class="form-label">Name</label>
+      <input class="form-input" id="editRecipeName">
+    </div>
+    <div class="row">
+      <div class="form-group">
+        <label class="form-label">Portionen</label>
+        <input class="form-input" id="editRecipeServings" type="number" min="1">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Saison</label>
+        <select class="form-select" id="editRecipeSeason">
+          <option value="">Alle</option>
+          <option>Frühling</option><option>Sommer</option><option>Herbst</option><option>Winter</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Notizen</label>
+      <input class="form-input" id="editRecipeNotes">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Favorit</label>
+      <select class="form-select" id="editRecipeFav">
+        <option value="FALSE">Nein</option>
+        <option value="TRUE">Ja ★</option>
+      </select>
+    </div>
+    <input type="hidden" id="editRecipeId">
+    <button class="btn btn-primary" onclick="saveEditRecipe()" style="margin-top:8px;">Speichern ✓</button>
+  </div>
+</div>
+
 </body>
 </html>
