@@ -999,8 +999,12 @@ function renderToday() {
 
   const fmt = v => Math.round(v * 10) / 10;
 
-  // Top 3: all macros except focusA and focusB
-  const top3Keys = MACRO_OPTIONS.map(o=>o.key).filter(k => k !== layout.focusA && k !== layout.focusB).slice(0,3);
+  // Top 3: kcal fix links, dann die restlichen Makros (nicht focusA/B)
+  const remainingKeys = MACRO_OPTIONS.map(o=>o.key).filter(k => k !== layout.focusA && k !== layout.focusB).slice(0,2);
+  const top3HTML = `
+    ${renderMacroTile('kcal', macros, target, 'top3')}
+    ${remainingKeys.map(k => renderMacroTile(k, macros, target, 'top3')).join('')}
+  `;
 
   // GI/GL tile (always fixed)
   const giVal = macros.giCarbSum > 0 ? Math.round(macros.giWeightedSum / macros.giCarbSum) : null;
@@ -1041,12 +1045,33 @@ function renderToday() {
         detail = `${log.servings||1} Portion(en)`;
       }
       if (!name) return;
+
+      // Focus A und B Werte für Log-Einträge
+      const FOOD_KEY_MAP = { protein:'protein_g', fiber:'fiber_g', fat:'fat_g', carb:'carb_g' };
+      let focusBadges = '';
+      if (log.item_type === 'food') {
+        const foodForBadge = state.foods.find(f => f.food_id === log.food_ref || f.food_id === log.item_id);
+        if (foodForBadge) {
+          const gForBadge = parseFloat(log.grams)||parseFloat(log.portion_pick)||100;
+          [layout.focusA, layout.focusB].forEach(focusKey => {
+            const foodField = FOOD_KEY_MAP[focusKey];
+            if (!foodField) return;
+            const per100 = parseFloat(foodForBadge[foodField])||0;
+            const val = Math.round((per100 * gForBadge / 100) * 10) / 10;
+            const color = getFocusColor(focusKey, per100);
+            const opt = MACRO_OPTIONS.find(o=>o.key===focusKey);
+            const emoji = opt ? opt.label.split(' ')[0] : '';
+            focusBadges += `<span style="font-size:12px;font-weight:600;color:${color};margin-right:4px;">${val}${opt?.unit||'g'} ${emoji}</span>`;
+          });
+        }
+      }
+
       entriesHTML += `<div class="log-item" id="logitem-${log.log_id}">
         <div style="flex:1;">
           <div class="log-item-name">${name}</div>
           <div class="log-item-detail">${detail}</div>
         </div>
-        ${fiberVal > 0 ? `<div class="log-item-fiber" style="margin-right:8px;">${fmt(fiberVal)}g 🌿</div>` : ''}
+        ${focusBadges ? `<div style="display:flex;align-items:center;margin-right:8px;">${focusBadges}</div>` : ''}
         <div style="display:flex;flex-direction:column;gap:4px;">
           <button onclick="editLogEntry('${log.log_id}','${name}',${log.item_type==='food'?parseFloat(log.grams)||100:0})" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:11px;color:var(--text2);cursor:pointer;">✏️</button>
           <button onclick="deleteLogEntry('${log.log_id}')" style="background:rgba(245,122,122,0.1);border:1px solid rgba(245,122,122,0.3);border-radius:6px;padding:4px 8px;font-size:11px;color:var(--danger);cursor:pointer;">🗑️</button>
@@ -1065,9 +1090,9 @@ function renderToday() {
   });
 
   document.getElementById('todayContent').innerHTML = `
-    <!-- Row 1: Top 3 kleine Makros -->
+    <!-- Row 1: Kalorien fix + 2 restliche Makros -->
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px;">
-      ${top3Keys.map(k => renderMacroTile(k, macros, target, 'top3')).join('')}
+      ${top3HTML}
     </div>
 
     <!-- Row 2: Fokus A (gross) -->
@@ -2161,7 +2186,6 @@ function showProfileModal() {
 // LAYOUT
 // ============================================================
 const MACRO_OPTIONS = [
-  { key: 'kcal',    label: '🔥 Kalorien',      unit: 'kcal' },
   { key: 'carb',    label: '🍞 Kohlenhydrate',  unit: 'g' },
   { key: 'protein', label: '💪 Protein',        unit: 'g' },
   { key: 'fat',     label: '🥑 Fett',           unit: 'g' },
@@ -2188,7 +2212,31 @@ const MICRO_OPTIONS = [
   { key: 'lysine',    label: '🔗 Lysin',       unit: 'mg' },
 ];
 
-// Default layout
+// Referenzwerte pro 100g für Farbgebung in Log-Einträgen
+const FOCUS_REF = {
+  protein: { low: 8,  high: 20, invert: false }, // hoch=grün
+  fiber:   { low: 2,  high: 6,  invert: false }, // hoch=grün
+  fat:     { low: 3,  high: 15, invert: true  }, // tief=grün
+  carb:    { low: 10, high: 30, invert: true  }, // tief=grün
+};
+
+// Gibt Farbe für einen Nährstoffwert pro 100g zurück
+function getFocusColor(key, valuePer100g) {
+  const ref = FOCUS_REF[key];
+  if (!ref) return 'var(--text2)';
+  const v = parseFloat(valuePer100g) || 0;
+  if (ref.invert) {
+    // tief=grün, hoch=rot
+    if (v <= ref.low)  return 'var(--accent)';
+    if (v >= ref.high) return 'var(--danger)';
+    return 'var(--text)';
+  } else {
+    // hoch=grün, tief=grau
+    if (v >= ref.high) return 'var(--accent)';
+    if (v <= ref.low)  return 'var(--text2)';
+    return 'var(--text)';
+  }
+}
 let layout = {
   focusA: 'fiber',
   focusB: 'protein',
@@ -2324,7 +2372,8 @@ async function saveTagesziele() {
 // RENDER TILE HELPER
 // ============================================================
 function renderMacroTile(key, macros, target, size='small') {
-  const all = [...MACRO_OPTIONS, ...MICRO_OPTIONS];
+  const KCAL_OPT = { key: 'kcal', label: '🔥 Kalorien', unit: 'kcal' };
+  const all = [KCAL_OPT, ...MACRO_OPTIONS, ...MICRO_OPTIONS];
   const opt = all.find(o => o.key === key);
   if (!opt) return '';
 
