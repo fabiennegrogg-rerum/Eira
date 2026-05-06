@@ -744,13 +744,9 @@
     <div class="modal-handle"></div>
     <button class="modal-close" onclick="closeModal('dayTypeModal')">✕</button>
     <div class="modal-title">Tagestyp</div>
-    <div style="display:flex;flex-direction:column;gap:10px;">
-      <button class="btn btn-secondary" onclick="setDayType('Ruhetag','😴')">😴 Ruhetag</button>
-      <button class="btn btn-secondary" onclick="setDayType('Arbeitstag','💼')">💼 Arbeitstag</button>
-      <button class="btn btn-secondary" onclick="setDayType('Sporttag','🏃')">🏃 Sporttag</button>
-      <div style="border-top:1px solid var(--border);margin-top:4px;padding-top:10px;">
-        <button class="btn btn-secondary" onclick="closeModal('dayTypeModal');showTagesziele();" style="color:var(--accent2);">🎯 Tagesziele bearbeiten</button>
-      </div>
+    <div id="dayTypeButtons" style="display:flex;flex-direction:column;gap:10px;"></div>
+    <div style="border-top:1px solid var(--border);margin-top:14px;padding-top:10px;">
+      <button class="btn btn-secondary" onclick="closeModal('dayTypeModal');showTagesziele();" style="color:var(--accent2);">🎯 Tagesziele bearbeiten</button>
     </div>
   </div>
 </div>
@@ -868,18 +864,20 @@ function rowsToObjects(rows) {
 // ============================================================
 async function loadAll() {
   try {
-    const [foodRows, recipeRows, recipeItemRows, logRows, targetRows] = await Promise.all([
+    // allSettled: ein fehlgeschlagenes Sheet bricht nicht alles ab
+    const [foodRes, recipeRes, recipeItemRes, logRes, targetRes] = await Promise.allSettled([
       fetchSheet(SHEETS.foods),
       fetchSheet(SHEETS.recipes),
       fetchSheet(SHEETS.recipe_items),
       fetchSheet(SHEETS.logs),
       fetchSheet(SHEETS.targets)
     ]);
-    state.foods = rowsToObjects(foodRows);
-    state.recipes = rowsToObjects(recipeRows);
-    state.recipeItems = rowsToObjects(recipeItemRows);
-    state.logs = rowsToObjects(logRows);
-    state.targets = rowsToObjects(targetRows);
+
+    state.foods      = foodRes.status==='fulfilled'      ? rowsToObjects(foodRes.value)       : [];
+    state.recipes    = recipeRes.status==='fulfilled'    ? rowsToObjects(recipeRes.value)     : [];
+    state.recipeItems= recipeItemRes.status==='fulfilled'? rowsToObjects(recipeItemRes.value) : [];
+    state.logs       = logRes.status==='fulfilled'       ? rowsToObjects(logRes.value)        : [];
+    state.targets    = targetRes.status==='fulfilled'    ? rowsToObjects(targetRes.value)     : [];
 
     // Filter today's logs
     state.todayLogs = state.logs.filter(l => {
@@ -901,7 +899,7 @@ async function loadAll() {
 // TODAY PAGE
 // ============================================================
 function getTodayTarget() {
-  return state.targets.find(t => t.date === state.dayType || t.notes === state.dayType) || state.targets[1] || {};
+  return state.targets.find(t => t.date === state.dayType) || state.targets[0] || {};
 }
 
 function calcTodayMacros() {
@@ -1554,7 +1552,19 @@ function showAddRecipeModal() {
 // ============================================================
 // DAY TYPE
 // ============================================================
-function showDayTypeModal() { openModal('dayTypeModal'); }
+function showDayTypeModal() {
+  // Dynamisch aus targets-Sheet laden
+  const emojis = ['😴','💼','🏃','🧘','🎯','⚡','🌟'];
+  const btns = state.targets.map((t, i) => {
+    const name = t.date || `Tag ${i+1}`;
+    const emoji = emojis[i] || '📅';
+    const active = name === state.dayType;
+    return `<button class="btn ${active?'btn-primary':'btn-secondary'}" onclick="setDayType('${name}','${emoji}')">${emoji} ${name}</button>`;
+  }).join('');
+  document.getElementById('dayTypeButtons').innerHTML = btns || '<div style="color:var(--text2);font-size:13px;">Keine Tagestypen gefunden</div>';
+  openModal('dayTypeModal');
+}
+
 function setDayType(type, emoji) {
   state.dayType = type;
   state.dayEmoji = emoji;
@@ -2236,12 +2246,78 @@ function saveLayout() {
 }
 
 function showTagesziele() {
-  // Simple prompt-based editing for now — full modal can come later
   const target = getTodayTarget();
-  const kcal = prompt('Kalorienziel:', parseFloat(target.kcal_target)||2000);
-  if (kcal === null) return;
-  // Further fields could be added step by step
-  alert('Tagesziele-Bearbeitung kommt in einer späteren Version. Bitte im Google Sheet targets anpassen.');
+  const fields = [
+    { key:'kcal_target',      label:'🔥 Kalorien (kcal)',    step:'1' },
+    { key:'protein_g',        label:'💪 Protein (g)',         step:'1' },
+    { key:'carb_g',           label:'🍞 Kohlenhydrate (g)',   step:'1' },
+    { key:'fat_g',            label:'🥑 Fett (g)',            step:'1' },
+    { key:'fiber_g',          label:'🌿 Ballaststoffe (g)',   step:'1' },
+    { key:'zucker_g',         label:'🍬 Zucker (g)',          step:'1' },
+    { key:'gi_avg_target',    label:'📊 GI Ø Ziel',          step:'1' },
+    { key:'gl_daily_target',  label:'📊 GL Tag Ziel',        step:'1' },
+    { key:'vitamin_c_mg',     label:'🍊 Vitamin C (mg)',      step:'1' },
+    { key:'vitamin_a_rae_ug', label:'👁️ Vitamin A (µg)',     step:'1' },
+    { key:'vitamin_d_iu',     label:'☀️ Vitamin D (IU)',     step:'1' },
+    { key:'vitamin_k_ug',     label:'🥬 Vitamin K (µg)',     step:'1' },
+    { key:'vitamin_b12_ug',   label:'🔵 Vitamin B12 (µg)',   step:'0.1' },
+    { key:'folsaeure_ug',     label:'🧬 Folsäure (µg)',      step:'1' },
+    { key:'calcium_mg',       label:'🦴 Calcium (mg)',        step:'1' },
+    { key:'iron_mg',          label:'🩸 Eisen (mg)',          step:'0.1' },
+    { key:'zinc_mg',          label:'⚡ Zink (mg)',           step:'0.1' },
+    { key:'magnesium_mg',     label:'⚙️ Magnesium (mg)',     step:'1' },
+    { key:'kalium_mg',        label:'🫀 Kalium (mg)',         step:'1' },
+    { key:'natrium_mg',       label:'🧂 Natrium (mg)',        step:'1' },
+    { key:'omega3_g',         label:'🐟 Omega 3 (g)',         step:'0.1' },
+    { key:'selene_ug',        label:'🛡️ Selen (µg)',         step:'0.1' },
+    { key:'jod_ug',           label:'🌊 Jod (µg)',            step:'1' },
+    { key:'tryptophan_mg',    label:'💤 Tryptophan (mg)',     step:'1' },
+    { key:'lysine_mg',        label:'🔗 Lysin (mg)',          step:'1' },
+  ];
+
+  const rows = fields.map(f =>
+    `<div class="row" style="margin-bottom:10px;">
+      <div style="flex:1;display:flex;align-items:center;font-size:13px;color:var(--text2);">${f.label}</div>
+      <input class="form-input" type="number" step="${f.step}" id="tz_${f.key}"
+        value="${parseFloat(target[f.key])||''}" placeholder="–"
+        style="width:100px;flex:none;text-align:right;padding:8px 10px;">
+    </div>`
+  ).join('');
+
+  document.getElementById('tageszieleName').textContent = state.dayType;
+  document.getElementById('tagesziele_fields').innerHTML = rows;
+  openModal('tageszielModal');
+}
+
+async function saveTagesziele() {
+  const target = getTodayTarget();
+  const fields = ['kcal_target','protein_g','carb_g','fat_g','fiber_g','zucker_g',
+    'gi_avg_target','gl_daily_target','vitamin_c_mg','vitamin_a_rae_ug','vitamin_d_iu',
+    'vitamin_k_ug','vitamin_b12_ug','folsaeure_ug','calcium_mg','iron_mg','zinc_mg',
+    'magnesium_mg','kalium_mg','natrium_mg','omega3_g','selene_ug','jod_ug',
+    'tryptophan_mg','lysine_mg'];
+
+  const updated = {};
+  fields.forEach(f => {
+    const el = document.getElementById('tz_' + f);
+    if (el && el.value !== '') updated[f] = el.value;
+  });
+
+  try {
+    await fetch(APPS_SCRIPT_URL, {
+      method: 'POST', mode: 'no-cors',
+      headers: {'Content-Type':'text/plain'},
+      body: JSON.stringify({ action: 'updateTarget', dayType: state.dayType, fields: updated })
+    });
+    // Update local state
+    const idx = state.targets.findIndex(t => t.date === state.dayType);
+    if (idx >= 0) state.targets[idx] = { ...state.targets[idx], ...updated };
+    closeModal('tageszielModal');
+    renderToday();
+    alert('✓ Ziele gespeichert!');
+  } catch(e) {
+    alert('Fehler: ' + e.message);
+  }
 }
 
 // ============================================================
@@ -2464,6 +2540,17 @@ loadLayout();
     <button class="modal-close" onclick="closeModal('qualityCheckModal')">✕</button>
     <div class="modal-title">🔍 Qualitäts-Check</div>
     <div id="qualityCheckContent"></div>
+  </div>
+</div>
+
+<!-- Modal: Tagesziele -->
+<div class="modal-overlay" id="tageszielModal">
+  <div class="modal" style="position:relative;max-height:90vh;overflow-y:auto;">
+    <div class="modal-handle"></div>
+    <button class="modal-close" onclick="closeModal('tageszielModal')">✕</button>
+    <div class="modal-title">🎯 Ziele: <span id="tageszieleName"></span></div>
+    <div id="tagesziele_fields"></div>
+    <button class="btn btn-primary" onclick="saveTagesziele()" style="margin-top:8px;">Speichern ✓</button>
   </div>
 </div>
 
