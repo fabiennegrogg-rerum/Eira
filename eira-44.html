@@ -1441,7 +1441,7 @@ async function saveNewFood() {
     '',                                                      // B: eira_comment
     name,                                                    // C: name
     document.getElementById('newFoodCategory').value,       // D: category
-    '',                                                      // E: (leer)
+    'Manuell',                                               // E: source
     document.getElementById('nf_portion').value || 100,     // F: default_serving
     document.getElementById('nf_protein').value || 0,       // G: protein_g
     document.getElementById('nf_carb').value || 0,          // H: carb_g
@@ -1467,7 +1467,7 @@ async function saveNewFood() {
   ];
   try {
     await appendRow(SHEETS.foods, row);
-    const newFood = { food_id:id, name, category:document.getElementById('newFoodCategory').value, protein_g:row[5], carb_g:row[6], fat_g:row[7], fiber_g:row[8], vitamin_c_mg:row[9], iron_mg:row[13], unit_type:unit };
+    const newFood = { food_id:id, name, category:document.getElementById('newFoodCategory').value, source:'Manuell', default_serving:row[5], protein_g:row[6], carb_g:row[7], fat_g:row[8], fiber_g:row[9], vitamin_c_mg:row[10], iron_mg:row[12], unit_type:unit, portion_min:row[22], portion_max:row[23], portion_default:row[24] };
     state.foods.push(newFood);
     closeModal('addFoodModal');
     renderFoods();
