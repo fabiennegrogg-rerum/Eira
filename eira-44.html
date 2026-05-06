@@ -892,6 +892,21 @@ function calcTodayMacros() {
       macros.fiber += (parseFloat(food.fiber_g)||0) * factor;
       macros.iron += (parseFloat(food.iron_mg)||0) * factor;
       macros.vitc += (parseFloat(food.vitamin_c_mg)||0) * factor;
+      macros.kcal += ((parseFloat(food.protein_g)||0) * 4 + (parseFloat(food.carb_g)||0) * 4 + (parseFloat(food.fat_g)||0) * 9) * factor;
+      macros.calcium += (parseFloat(food.calcium_mg)||0) * factor;
+      macros.zinc += (parseFloat(food.zinc_mg)||0) * factor;
+      macros.omega3 += (parseFloat(food.omega3_g)||0) * factor;
+      macros.vitA += (parseFloat(food.vitamin_a_rae_ug)||0) * factor;
+      // GL: gl pro 100g * factor (grams/100)
+      const glPer100 = parseFloat(food.gl)||0;
+      if (glPer100 > 0) macros.gl += glPer100 * factor;
+      // GI gewichtet nach verfügbaren KH
+      const gi = parseFloat(food.gi)||0;
+      const carbsForGI = (parseFloat(food.carb_g)||0) * factor;
+      if (gi > 0 && carbsForGI > 0) {
+        macros.giWeightedSum += gi * carbsForGI;
+        macros.giCarbSum += carbsForGI;
+      }
     } else if (log.item_type === 'recipe') {
       const servings = parseFloat(log.servings) || 1;
       const recipeId = log.recipe_ref || log.item_id;
@@ -914,6 +929,16 @@ function calcTodayMacros() {
         macros.zinc += (parseFloat(food.zinc_mg)||0) * factor;
         macros.omega3 += (parseFloat(food.omega3_g)||0) * factor;
         macros.vitA += (parseFloat(food.vitamin_a_rae_ug)||0) * factor;
+        // GL für Rezept-Zutaten
+        const glPer100r = parseFloat(food.gl)||0;
+        if (glPer100r > 0) macros.gl += glPer100r * factor;
+        // GI gewichtet nach verfügbaren KH
+        const gir = parseFloat(food.gi)||0;
+        const carbsForGIr = (parseFloat(food.carb_g)||0) * factor;
+        if (gir > 0 && carbsForGIr > 0) {
+          macros.giWeightedSum += gir * carbsForGIr;
+          macros.giCarbSum += carbsForGIr;
+        }
       });
     }
   });
@@ -1404,22 +1429,41 @@ async function saveNewFood() {
   if (!name) { showError('addFoodError', 'Bitte einen Namen eingeben'); return; }
   const unit = document.querySelector('#unitChips .chip.selected')?.textContent || 'g';
   const id = generateFoodId();
+  // Spaltenreihenfolge gemäss Google Sheet:
+  // A=food_id, B=eira_comment, C=name, D=category, E='',
+  // F=default_serving, G=protein_g, H=carb_g, I=fat_g, J=fiber_g,
+  // K=vitamin_c_mg, L=calcium_mg, M=iron_mg, N=zinc_mg, O=omega3_g,
+  // P=vitamin_a_rae_ug, Q=gi, R=gl, S=vitamin_d_iu, T=tryptophan_mg,
+  // U=lysine_mg, V=unit_type, W=portion_min, X=portion_max,
+  // Y=portion_default, Z=density_g_per_ml, AA=fav
   const row = [
-    id, '', name,
-    document.getElementById('newFoodCategory').value,
-    document.getElementById('nf_portion').value || 100,
-    document.getElementById('nf_protein').value || 0,
-    document.getElementById('nf_carb').value || 0,
-    document.getElementById('nf_fat').value || 0,
-    document.getElementById('nf_fiber').value || 0,
-    document.getElementById('nf_vitc').value || 0,
-    '', '', '',
-    document.getElementById('nf_iron').value || 0,
-    '', '', unit,
-    document.getElementById('nf_min').value || 50,
-    document.getElementById('nf_max').value || 300,
-    document.getElementById('nf_portion').value || 100,
-    '', 'FALSE'
+    id,                                                      // A: food_id
+    '',                                                      // B: eira_comment
+    name,                                                    // C: name
+    document.getElementById('newFoodCategory').value,       // D: category
+    '',                                                      // E: (leer)
+    document.getElementById('nf_portion').value || 100,     // F: default_serving
+    document.getElementById('nf_protein').value || 0,       // G: protein_g
+    document.getElementById('nf_carb').value || 0,          // H: carb_g
+    document.getElementById('nf_fat').value || 0,           // I: fat_g
+    document.getElementById('nf_fiber').value || 0,         // J: fiber_g
+    document.getElementById('nf_vitc').value || 0,          // K: vitamin_c_mg
+    '',                                                      // L: calcium_mg
+    document.getElementById('nf_iron').value || 0,          // M: iron_mg
+    '',                                                      // N: zinc_mg
+    '',                                                      // O: omega3_g
+    '',                                                      // P: vitamin_a_rae_ug
+    '',                                                      // Q: gi
+    '',                                                      // R: gl
+    '',                                                      // S: vitamin_d_iu
+    '',                                                      // T: tryptophan_mg
+    '',                                                      // U: lysine_mg
+    unit,                                                    // V: unit_type
+    document.getElementById('nf_min').value || 50,          // W: portion_min
+    document.getElementById('nf_max').value || 300,         // X: portion_max
+    document.getElementById('nf_portion').value || 100,     // Y: portion_default
+    '',                                                      // Z: density_g_per_ml
+    'FALSE'                                                  // AA: fav
   ];
   try {
     await appendRow(SHEETS.foods, row);
