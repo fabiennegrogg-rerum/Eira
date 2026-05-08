@@ -1911,7 +1911,7 @@ function showQualityCheck() {
       const missing = checkCols.filter(col => {
         const val = food[col];
         return val === '' || val === null || val === undefined;
-      });
+      }).filter(col => col && col.trim() !== ''); // leere Spaltennamen überspringen
       return { food, missing };
     }).filter(f => f.missing.length > 0);
 
@@ -1937,9 +1937,7 @@ function showQualityCheck() {
             ✏️ Bearbeiten
           </button>
         </div>
-        <div style="font-size:12px;color:var(--danger);">
-          Fehlend: ${missing.join(', ')}
-        </div>
+        ${missing.length > 0 ? `<div style="font-size:12px;color:var(--danger);">Fehlend: ${missing.join(', ')}</div>` : `<div style="font-size:12px;color:var(--accent);">✓ Vollständig</div>`}
       </div>`;
     });
 
