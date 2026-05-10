@@ -756,7 +756,7 @@
 // CONFIG
 // ============================================================
 const API_KEY = 'AIzaSyCg78COwFI-j_vbM4ychrgMv78ArRGXPBw';
-const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyPtSRrjtkhA6akA1qqRUMUuYBtjqeEqaHws6TegXHPQhyEeQK-9hPqr-hT0FImqLpX/exec';
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzl7vT1jCoiIE4qbkHQCNb7TPUPkZBrnsxLHxKAAINDcNlAcBsW2t3SP4FG_3uVXhA/exec';
 const SHEETS_BASE = {
   foods:         '1h59YPkiStd4xFDClRowrT6PEKVMRDYjOazdbS8nG1nk',
   recipes:       '1HcUVFI9I8Fm6uU7m9ZgC3u8FolwulTbDGkE21hA08aI',
@@ -1604,9 +1604,9 @@ function setDayType(type, emoji) {
 async function deleteLogEntry(logId) {
   if (!confirm('Eintrag wirklich löschen?')) return;
   try {
-    const url = `${APPS_SCRIPT_URL}?action=deleteLog&logId=${encodeURIComponent(logId)}`;
+    const sheetId = SHEETS.logs !== SHEETS_BASE.logs ? SHEETS.logs : '';
+    const url = `${APPS_SCRIPT_URL}?action=deleteLog&logId=${encodeURIComponent(logId)}${sheetId ? '&sheetId=' + encodeURIComponent(sheetId) : ''}`;
     await fetch(url, { method: 'GET', mode: 'no-cors' });
-    // Remove from local state
     state.logs = state.logs.filter(l => l.log_id !== logId);
     state.todayLogs = state.todayLogs.filter(l => l.log_id !== logId);
     document.getElementById('logitem-' + logId)?.remove();
@@ -1625,9 +1625,9 @@ function editLogEntry(logId, name, currentGrams) {
 
 async function updateLogEntry(logId, grams) {
   try {
-    const url = `${APPS_SCRIPT_URL}?action=updateLog&logId=${encodeURIComponent(logId)}&grams=${grams}`;
+    const sheetId = SHEETS.logs !== SHEETS_BASE.logs ? SHEETS.logs : '';
+    const url = `${APPS_SCRIPT_URL}?action=updateLog&logId=${encodeURIComponent(logId)}&grams=${grams}${sheetId ? '&sheetId=' + encodeURIComponent(sheetId) : ''}`;
     await fetch(url, { method: 'GET', mode: 'no-cors' });
-    // Update local state
     const log = state.logs.find(l => l.log_id === logId);
     if (log) log.grams = String(grams);
     const todayLog = state.todayLogs.find(l => l.log_id === logId);
@@ -2350,10 +2350,11 @@ async function saveTagesziele() {
   });
 
   try {
+    const sheetId = SHEETS.targets !== SHEETS_BASE.targets ? SHEETS.targets : '';
     await fetch(APPS_SCRIPT_URL, {
       method: 'POST', mode: 'no-cors',
       headers: {'Content-Type':'text/plain'},
-      body: JSON.stringify({ action: 'updateTarget', dayType: state.dayType, fields: updated })
+      body: JSON.stringify({ action: 'updateTarget', dayType: state.dayType, fields: updated, sheetId: sheetId || undefined })
     });
     // Update local state
     const idx = state.targets.findIndex(t => t.date === state.dayType);
