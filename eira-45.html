@@ -552,7 +552,7 @@
   <p class="section-title">Lebensmittel</p>
   <div style="display:flex;gap:8px;margin-bottom:16px;">
     <button class="btn btn-primary btn-sm" onclick="showAddFoodModal()">+ Neu</button>
-    <button class="btn btn-secondary btn-sm" onclick="showQualityCheck()">🔍 Qualitäts-Check</button>
+    <button id="qualityCheckBtn" class="btn btn-secondary btn-sm" onclick="showQualityCheck()">🔍 Qualitäts-Check</button>
   </div>
   <div class="search-box">
     <span class="search-icon">🔍</span>
@@ -1172,30 +1172,98 @@ function filterFoods(val) { renderFoods(val); }
 // RECIPES PAGE
 // ============================================================
 function renderRecipes() {
+  const adminUser = isAdmin();
   if (!state.recipes.length) {
     document.getElementById('recipesContent').innerHTML = '<div class="empty-state">Keine Rezepte vorhanden</div>';
     return;
   }
+
+  // Filter: admin sieht alle, user sieht public + eigene
+  const visible = state.recipes.filter(r => {
+    if (adminUser) return true;
+    if (r.status === 'public') return true;
+    if (r.created_by === currentUser?.user_id) return true;
+    return false;
+  }).sort((a,b) => (a.name||'').localeCompare(b.name||''));
+
+  // Status badge helper
+  const statusBadge = (r) => {
+    if (r.status === 'public') return '';
+    if (r.status === 'pending') return `<span style="background:rgba(245,200,122,0.2);color:var(--accent2);border-radius:4px;padding:2px 6px;font-size:10px;font-weight:600;">⏳ Ausstehend</span>`;
+    return `<span style="background:rgba(122,200,245,0.2);color:var(--accent3);border-radius:4px;padding:2px 6px;font-size:10px;font-weight:600;">🔒 Privat</span>`;
+  };
+
   let html = '';
-  state.recipes.forEach(r => {
+  visible.forEach(r => {
     const items = state.recipeItems.filter(ri => ri.recipe_id === r.recipe_id);
+    const ownRecipe = r.created_by === currentUser?.user_id;
+    const canEdit = adminUser || ownRecipe;
+    const canDelete = adminUser || ownRecipe;
+
     html += `<div class="card">
-      <div style="display:flex;align-items:center;justify-content:space-between;">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;">
         <div style="flex:1;">
-          <div style="font-weight:600;font-size:15px;">${r.name||'–'}</div>
-          <div style="font-size:12px;color:var(--text2);margin-top:3px;">${r.serving_yield||1} Portion(en) · ${items.length} Zutaten ${r.season_tag ? '· '+r.season_tag : ''}</div>
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:3px;">
+            <div style="font-weight:600;font-size:15px;">${r.name||'–'}</div>
+            ${statusBadge(r)}
+            ${r.is_favorite==='TRUE' ? '<span style="color:var(--accent2);">★</span>' : ''}
+          </div>
+          <div style="font-size:12px;color:var(--text2);">${r.serving_yield||1} Portion(en) · ${items.length} Zutaten${r.season_tag ? ' · '+r.season_tag : ''}${r.created_by && adminUser ? ' · von '+r.created_by : ''}</div>
         </div>
-        <div style="display:flex;align-items:center;gap:6px;">
-          ${r.is_favorite==='TRUE' ? '<span style="color:var(--accent2);">★</span>' : ''}
-          <button onclick="showEditRecipeModal('${r.recipe_id}')" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:11px;color:var(--text2);cursor:pointer;">✏️</button>
-          <button onclick="duplicateRecipe('${r.recipe_id}')" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:11px;color:var(--text2);cursor:pointer;">⊕</button>
-          <button onclick="deleteRecipe('${r.recipe_id}','${r.name}')" style="background:rgba(245,122,122,0.1);border:1px solid rgba(245,122,122,0.3);border-radius:6px;padding:4px 8px;font-size:11px;color:var(--danger);cursor:pointer;">🗑️</button>
+        <div style="display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end;">
+          ${canEdit ? `<button onclick="showEditRecipeModal('${r.recipe_id}')" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:11px;color:var(--text2);cursor:pointer;">✏️</button>` : ''}
+          ${canEdit ? `<button onclick="duplicateRecipe('${r.recipe_id}')" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:11px;color:var(--text2);cursor:pointer;">⊕</button>` : ''}
+          ${canDelete ? `<button onclick="deleteRecipe('${r.recipe_id}','${r.name}')" style="background:rgba(245,122,122,0.1);border:1px solid rgba(245,122,122,0.3);border-radius:6px;padding:4px 8px;font-size:11px;color:var(--danger);cursor:pointer;">🗑️</button>` : ''}
+          ${ownRecipe && r.status === 'private' ? `<button onclick="submitRecipe('${r.recipe_id}')" style="background:rgba(200,245,122,0.15);border:1px solid var(--accent);border-radius:6px;padding:4px 8px;font-size:11px;color:var(--accent);cursor:pointer;">📤 Einreichen</button>` : ''}
+          ${adminUser && r.status === 'pending' ? `<button onclick="approveRecipe('${r.recipe_id}')" style="background:rgba(200,245,122,0.15);border:1px solid var(--accent);border-radius:6px;padding:4px 8px;font-size:11px;color:var(--accent);cursor:pointer;">✅ Freigeben</button>` : ''}
+          ${adminUser && r.status === 'pending' ? `<button onclick="rejectRecipe('${r.recipe_id}')" style="background:rgba(245,122,122,0.1);border:1px solid rgba(245,122,122,0.3);border-radius:6px;padding:4px 8px;font-size:11px;color:var(--danger);cursor:pointer;">❌ Ablehnen</button>` : ''}
         </div>
       </div>
       ${r.notes ? `<div style="font-size:12px;color:var(--text2);margin-top:8px;">${r.notes}</div>` : ''}
     </div>`;
   });
   document.getElementById('recipesContent').innerHTML = html;
+}
+
+async function submitRecipe(recipeId) {
+  if (!confirm('Rezept zur Freigabe einreichen?')) return;
+  try {
+    await fetch(APPS_SCRIPT_URL, {
+      method: 'POST', mode: 'no-cors',
+      headers: {'Content-Type':'text/plain'},
+      body: JSON.stringify({ action: 'updateRecipe', recipeId, fields: { status: 'pending' } })
+    });
+    const r = state.recipes.find(r => r.recipe_id === recipeId);
+    if (r) r.status = 'pending';
+    renderRecipes();
+  } catch(e) { alert('Fehler: ' + e.message); }
+}
+
+async function approveRecipe(recipeId) {
+  try {
+    await fetch(APPS_SCRIPT_URL, {
+      method: 'POST', mode: 'no-cors',
+      headers: {'Content-Type':'text/plain'},
+      body: JSON.stringify({ action: 'updateRecipe', recipeId, fields: { status: 'public' } })
+    });
+    const r = state.recipes.find(r => r.recipe_id === recipeId);
+    if (r) r.status = 'public';
+    renderRecipes();
+  } catch(e) { alert('Fehler: ' + e.message); }
+}
+
+async function rejectRecipe(recipeId) {
+  if (!confirm('Rezept ablehnen? Es wird wieder privat.')) return;
+  try {
+    await fetch(APPS_SCRIPT_URL, {
+      method: 'POST', mode: 'no-cors',
+      headers: {'Content-Type':'text/plain'},
+      body: JSON.stringify({ action: 'updateRecipe', recipeId, fields: { status: 'private' } })
+    });
+    const r = state.recipes.find(r => r.recipe_id === recipeId);
+    if (r) r.status = 'private';
+    renderRecipes();
+  } catch(e) { alert('Fehler: ' + e.message); }
 }
 
 // ============================================================
@@ -1476,11 +1544,12 @@ async function saveNewFood() {
     '',                                                      // AF: lysine_mg
     unit,                                                    // AG: unit_type
     '',                                                      // AH: density_g_per_ml
-    'FALSE'                                                  // AI: fav
+    'FALSE',                                                 // AI: fav
+    currentUser ? currentUser.user_id : ''                   // AJ: created_by
   ];
   try {
     await appendRow(SHEETS.foods, row);
-    const newFood = { food_id:id, name, category:document.getElementById('newFoodCategory').value, source:'Manuell', portion_g:row[5], protein_g:row[6], carb_g:row[7], fat_g:row[8], fiber_g:row[9], zucker_g:row[10], vitamin_c_mg:row[11], iron_mg:row[22], unit_type:unit };
+    const newFood = { food_id:id, name, category:document.getElementById('newFoodCategory').value, source:'Manuell', portion_g:row[5], protein_g:row[6], carb_g:row[7], fat_g:row[8], fiber_g:row[9], zucker_g:row[10], vitamin_c_mg:row[11], iron_mg:row[22], unit_type:unit, created_by: currentUser ? currentUser.user_id : '' };
     state.foods.push(newFood);
     closeModal('addFoodModal');
     renderFoods();
@@ -1544,14 +1613,14 @@ async function saveNewRecipe() {
   const servings = document.getElementById('newRecipeServings').value || 1;
   const season = document.getElementById('newRecipeSeason').value;
   const notes = document.getElementById('newRecipeNotes').value;
-  const recipeRow = [recipeId, name, servings, notes, season, 'FALSE'];
+  const isAdminUser = isAdmin();
+  const recipeRow = [recipeId, name, servings, notes, season, 'FALSE', currentUser ? currentUser.user_id : '', isAdminUser ? 'public' : 'private'];
   try {
     await appendRow(SHEETS.recipes, recipeRow);
-    // Add recipe items
     for (const ing of state.newRecipeIngredients) {
       await appendRow(SHEETS.recipe_items, [recipeId, ing.food_id, ing.grams]);
     }
-    const newRecipe = { recipe_id:recipeId, name, serving_yield:servings, notes, season_tag:season, is_favorite:'FALSE' };
+    const newRecipe = { recipe_id:recipeId, name, serving_yield:servings, notes, season_tag:season, is_favorite:'FALSE', created_by: currentUser ? currentUser.user_id : '', status: isAdminUser ? 'public' : 'private' };
     state.recipes.push(newRecipe);
     state.newRecipeIngredients.forEach(ing => state.recipeItems.push({ recipe_id:recipeId, food_id:ing.food_id, grams:ing.grams }));
     state.newRecipeIngredients = [];
@@ -1891,58 +1960,179 @@ async function saveEditRecipe() {
 // ============================================================
 function showQualityCheck() {
   const el = document.getElementById('qualityCheckContent');
-  el.innerHTML = '<div class="loading"><div class="spinner"></div>Prüfe Lebensmittel...</div>';
+  el.innerHTML = `
+    <div style="display:flex;gap:8px;margin-bottom:16px;">
+      <button class="btn btn-primary" style="flex:1;font-size:12px;" onclick="showQualityTab('missing')">❌ Fehlend</button>
+      <button class="btn btn-secondary" style="flex:1;font-size:12px;" onclick="showQualityTab('portions')">⚖️ Portionen</button>
+      <button class="btn btn-secondary" style="flex:1;font-size:12px;" onclick="showQualityTab('new')">👤 Neu</button>
+    </div>
+    <div id="qualityTabContent"><div class="loading"><div class="spinner"></div>Lade...</div></div>
+  `;
   openModal('qualityCheckModal');
+  setTimeout(() => showQualityTab('missing'), 100);
+}
 
-  setTimeout(() => {
-    if (!state.foods.length) {
-      el.innerHTML = '<div class="error-msg">Keine Lebensmittel geladen.</div>';
-      return;
-    }
+function showQualityTab(tab) {
+  const btns = document.querySelectorAll('#qualityCheckContent .btn');
+  btns.forEach(b => b.className = 'btn btn-secondary');
+  if (tab === 'missing') btns[0].className = 'btn btn-primary';
+  else if (tab === 'portions') btns[1].className = 'btn btn-primary';
+  else btns[2].className = 'btn btn-primary';
 
-    // Get all column names from first food item
-    const allCols = Object.keys(state.foods[0]);
-    // Columns to skip (meta/non-nutritional)
-    const skipCols = ['food_id', 'eira_comment', 'name', 'category', 'source', 'unit_type', 'fav', 'density_g_per_ml'];
-    const checkCols = allCols.filter(c => !skipCols.includes(c));
+  const el = document.getElementById('qualityTabContent');
+  if (tab === 'missing') showMissingValuesTab(el);
+  else if (tab === 'portions') showPortionsTab(el);
+  else showNewFoodsTab(el);
+}
 
-    // Find foods with missing values
-    const incomplete = state.foods.map(food => {
-      const missing = checkCols.filter(col => {
-        const val = food[col];
-        return val === '' || val === null || val === undefined;
-      }).filter(col => col && col.trim() !== ''); // leere Spaltennamen überspringen
-      return { food, missing };
-    }).filter(f => f.missing.length > 0);
+function showNewFoodsTab(el) {
+  const newFoods = state.foods
+    .filter(f => f.created_by && f.created_by.trim() !== '')
+    .sort((a,b) => (a.name||'').localeCompare(b.name||''));
 
-    if (!incomplete.length) {
-      el.innerHTML = `<div style="text-align:center;padding:30px;">
-        <div style="font-size:40px;margin-bottom:12px;">✅</div>
-        <div style="font-weight:600;">Alle Lebensmittel vollständig!</div>
-        <div style="font-size:13px;color:var(--text2);margin-top:8px;">${state.foods.length} Lebensmittel geprüft</div>
-      </div>`;
-      return;
-    }
-
-    let html = `<div style="font-size:13px;color:var(--text2);margin-bottom:16px;">
-      ${incomplete.length} von ${state.foods.length} Lebensmitteln haben fehlende Werte:
+  if (!newFoods.length) {
+    el.innerHTML = `<div style="text-align:center;padding:30px;">
+      <div style="font-size:40px;margin-bottom:12px;">✅</div>
+      <div style="font-weight:600;">Keine neuen Lebensmittel</div>
+      <div style="font-size:13px;color:var(--text2);margin-top:8px;">Noch nichts von Nutzern erfasst</div>
     </div>`;
+    return;
+  }
 
-    incomplete.forEach(({ food, missing }) => {
-      html += `<div style="background:var(--surface2);border-radius:var(--radius-sm);padding:12px;margin-bottom:10px;">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-          <div style="font-weight:600;font-size:14px;">${food.name||'–'}</div>
-          <button onclick="showEditFoodModal('${food.food_id}');closeModal('qualityCheckModal');" 
-            style="background:var(--accent);color:#0f0f0e;border:none;border-radius:6px;padding:4px 10px;font-size:12px;font-weight:600;cursor:pointer;">
-            ✏️ Bearbeiten
-          </button>
-        </div>
-        ${missing.length > 0 ? `<div style="font-size:12px;color:var(--danger);">Fehlend: ${missing.join(', ')}</div>` : `<div style="font-size:12px;color:var(--accent);">✓ Vollständig</div>`}
-      </div>`;
+  let html = `<div style="font-size:13px;color:var(--text2);margin-bottom:16px;">${newFoods.length} von Nutzern erstellte Lebensmittel:</div>`;
+  newFoods.forEach(food => {
+    html += `<div style="background:var(--surface2);border-radius:var(--radius-sm);padding:12px;margin-bottom:10px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+        <div style="font-weight:600;font-size:14px;">${food.name||'–'}</div>
+        <button onclick="showEditFoodModal('${food.food_id}');closeModal('qualityCheckModal');"
+          style="background:var(--accent);color:#0f0f0e;border:none;border-radius:6px;padding:4px 10px;font-size:12px;font-weight:600;cursor:pointer;">
+          ✏️ Bearbeiten
+        </button>
+      </div>
+      <div style="font-size:12px;color:var(--text2);">Von: ${food.created_by} · ${food.category||'–'}</div>
+    </div>`;
+  });
+  el.innerHTML = html;
+}
+
+function showMissingValuesTab(el) {
+  if (!state.foods.length) { el.innerHTML = '<div class="error-msg">Keine Lebensmittel geladen.</div>'; return; }
+
+  const allCols = Object.keys(state.foods[0]);
+  const skipCols = ['food_id','eira_comment','name','category','source','unit_type','fav','density_g_per_ml','portion_g'];
+  const checkCols = allCols.filter(c => !skipCols.includes(c));
+
+  const incomplete = state.foods.map(food => {
+    const missing = checkCols.filter(col => {
+      const val = food[col];
+      return (val === '' || val === null || val === undefined) && col && col.trim() !== '';
     });
+    return { food, missing };
+  }).filter(f => f.missing.length > 0)
+    .sort((a,b) => (a.food.name||'').localeCompare(b.food.name||''));
 
-    el.innerHTML = html;
-  }, 100);
+  if (!incomplete.length) {
+    el.innerHTML = `<div style="text-align:center;padding:30px;">
+      <div style="font-size:40px;margin-bottom:12px;">✅</div>
+      <div style="font-weight:600;">Alle Lebensmittel vollständig!</div>
+      <div style="font-size:13px;color:var(--text2);margin-top:8px;">${state.foods.length} Lebensmittel geprüft</div>
+    </div>`;
+    return;
+  }
+
+  let html = `<div style="font-size:13px;color:var(--text2);margin-bottom:16px;">
+    ${incomplete.length} von ${state.foods.length} Lebensmitteln haben fehlende Werte:
+  </div>`;
+
+  incomplete.forEach(({ food, missing }) => {
+    html += `<div style="background:var(--surface2);border-radius:var(--radius-sm);padding:12px;margin-bottom:10px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+        <div style="font-weight:600;font-size:14px;">${food.name||'–'}</div>
+        <button onclick="showEditFoodModal('${food.food_id}');closeModal('qualityCheckModal');"
+          style="background:var(--accent);color:#0f0f0e;border:none;border-radius:6px;padding:4px 10px;font-size:12px;font-weight:600;cursor:pointer;">
+          ✏️ Bearbeiten
+        </button>
+      </div>
+      <div style="font-size:12px;color:var(--danger);">Fehlend: ${missing.join(', ')}</div>
+    </div>`;
+  });
+  el.innerHTML = html;
+}
+
+function showPortionsTab(el) {
+  if (!state.foods.length || !state.logs.length) {
+    el.innerHTML = '<div style="color:var(--text2);font-size:13px;padding:16px 0;">Keine Logs vorhanden für Vergleich.</div>';
+    return;
+  }
+
+  // Für jedes Food: geloggte Mengen zählen
+  const loggedAmounts = {}; // food_id -> { amount: count }
+  state.logs.forEach(log => {
+    if (log.item_type !== 'food') return;
+    const fid = log.food_ref || log.item_id;
+    const g = parseFloat(log.grams) || parseFloat(log.portion_pick) || 0;
+    if (!fid || !g) return;
+    if (!loggedAmounts[fid]) loggedAmounts[fid] = {};
+    loggedAmounts[fid][g] = (loggedAmounts[fid][g] || 0) + 1;
+  });
+
+  // Finde Abweichungen
+  const deviations = [];
+  state.foods.forEach(food => {
+    const amounts = loggedAmounts[food.food_id];
+    if (!amounts) return;
+    const portionG = parseFloat(food.portion_g) || 0;
+
+    // Häufigste geloggte Menge
+    const mostCommon = Object.entries(amounts).sort((a,b) => b[1]-a[1])[0];
+    const mostCommonG = parseFloat(mostCommon[0]);
+    const count = mostCommon[1];
+
+    if (Math.abs(mostCommonG - portionG) > 5) { // >5g Abweichung
+      deviations.push({ food, portionG, mostCommonG, count });
+    }
+  });
+
+  if (!deviations.length) {
+    el.innerHTML = `<div style="text-align:center;padding:30px;">
+      <div style="font-size:40px;margin-bottom:12px;">✅</div>
+      <div style="font-weight:600;">Alle Portionen passen!</div>
+      <div style="font-size:13px;color:var(--text2);margin-top:8px;">Keine grossen Abweichungen gefunden</div>
+    </div>`;
+    return;
+  }
+
+  let html = `<div style="font-size:13px;color:var(--text2);margin-bottom:16px;">
+    ${deviations.length} Lebensmittel mit abweichenden Portionen:
+  </div>`;
+
+  deviations.forEach(({ food, portionG, mostCommonG, count }) => {
+    html += `<div style="background:var(--surface2);border-radius:var(--radius-sm);padding:12px;margin-bottom:10px;">
+      <div style="font-weight:600;font-size:14px;margin-bottom:6px;">${food.name}</div>
+      <div style="font-size:12px;color:var(--text2);">Standard: ${portionG}g</div>
+      <div style="font-size:12px;color:var(--accent2);">Häufigste Menge: ${mostCommonG}g (${count}× geloggt)</div>
+      <button onclick="updatePortionG('${food.food_id}', ${mostCommonG})"
+        style="margin-top:8px;background:var(--accent);color:#0f0f0e;border:none;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;">
+        ✓ ${mostCommonG}g übernehmen
+      </button>
+    </div>`;
+  });
+  el.innerHTML = html;
+}
+
+async function updatePortionG(foodId, newPortion) {
+  try {
+    await fetch(APPS_SCRIPT_URL, {
+      method: 'POST', mode: 'no-cors',
+      headers: {'Content-Type':'text/plain'},
+      body: JSON.stringify({ action: 'updateFood', foodId, fields: { portion_g: newPortion } })
+    });
+    const food = state.foods.find(f => f.food_id === foodId);
+    if (food) food.portion_g = String(newPortion);
+    showQualityTab('portions'); // refresh
+  } catch(e) {
+    alert('Fehler: ' + e.message);
+  }
 }
 
 // ============================================================
@@ -2151,6 +2341,7 @@ async function selectUser(userId) {
 
 async function loginUser(user) {
   currentUser = user;
+  const isAdmin = (user.role || '').toLowerCase() === 'admin';
 
   // Update SHEETS with user-specific IDs
   if (user.logs_sheet_id) SHEETS.logs = user.logs_sheet_id;
@@ -2165,7 +2356,15 @@ async function loginUser(user) {
   document.getElementById('page-today').style.display = '';
   document.getElementById('currentUserBadge').textContent = '👤 ' + user.name;
 
+  // Admin-only UI
+  const qualityBtn = document.getElementById('qualityCheckBtn');
+  if (qualityBtn) qualityBtn.style.display = isAdmin ? '' : 'none';
+
   await loadAll();
+}
+
+function isAdmin() {
+  return currentUser && (currentUser.role || '').toLowerCase() === 'admin';
 }
 
 function switchUser() {
@@ -2292,47 +2491,139 @@ function saveLayout() {
 }
 
 function showTagesziele() {
+  // Show target management + fields for current dayType
   const target = getTodayTarget();
+  renderTageszielModal(target);
+  openModal('tageszielModal');
+}
+
+function renderTageszielModal(target) {
+  const canDelete = state.targets.length > 1;
+  const canAdd = state.targets.length < 5;
+
+  // Target selector tabs
+  const tabs = state.targets.map(t =>
+    `<button class="btn ${t.date===state.dayType?'btn-primary':'btn-secondary'}"
+      style="font-size:12px;padding:6px 10px;"
+      onclick="state.dayType='${t.date}';renderTageszielModal(getTodayTarget());">
+      ${t.date}
+    </button>`
+  ).join('');
+
   const fields = [
-    { key:'kcal_target',      label:'🔥 Kalorien (kcal)',    step:'1' },
-    { key:'protein_g',        label:'💪 Protein (g)',         step:'1' },
-    { key:'carb_g',           label:'🍞 Kohlenhydrate (g)',   step:'1' },
-    { key:'fat_g',            label:'🥑 Fett (g)',            step:'1' },
-    { key:'fiber_g',          label:'🌿 Ballaststoffe (g)',   step:'1' },
-    { key:'zucker_g',         label:'🍬 Zucker (g)',          step:'1' },
-    { key:'gi_avg_target',    label:'📊 GI Ø Ziel',          step:'1' },
-    { key:'gl_daily_target',  label:'📊 GL Tag Ziel',        step:'1' },
-    { key:'vitamin_c_mg',     label:'🍊 Vitamin C (mg)',      step:'1' },
-    { key:'vitamin_a_rae_ug', label:'👁️ Vitamin A (µg)',     step:'1' },
-    { key:'vitamin_d_iu',     label:'☀️ Vitamin D (IU)',     step:'1' },
-    { key:'vitamin_k_ug',     label:'🥬 Vitamin K (µg)',     step:'1' },
-    { key:'vitamin_b12_ug',   label:'🔵 Vitamin B12 (µg)',   step:'0.1' },
-    { key:'folsaeure_ug',     label:'🧬 Folsäure (µg)',      step:'1' },
-    { key:'calcium_mg',       label:'🦴 Calcium (mg)',        step:'1' },
-    { key:'iron_mg',          label:'🩸 Eisen (mg)',          step:'0.1' },
-    { key:'zinc_mg',          label:'⚡ Zink (mg)',           step:'0.1' },
-    { key:'magnesium_mg',     label:'⚙️ Magnesium (mg)',     step:'1' },
-    { key:'kalium_mg',        label:'🫀 Kalium (mg)',         step:'1' },
-    { key:'natrium_mg',       label:'🧂 Natrium (mg)',        step:'1' },
-    { key:'omega3_g',         label:'🐟 Omega 3 (g)',         step:'0.1' },
-    { key:'selene_ug',        label:'🛡️ Selen (µg)',         step:'0.1' },
-    { key:'jod_ug',           label:'🌊 Jod (µg)',            step:'1' },
-    { key:'tryptophan_mg',    label:'💤 Tryptophan (mg)',     step:'1' },
-    { key:'lysine_mg',        label:'🔗 Lysin (mg)',          step:'1' },
+    { key:'kcal_target',      label:'🔥 Kalorien (kcal)',   step:'1' },
+    { key:'protein_g',        label:'💪 Protein (g)',        step:'1' },
+    { key:'carb_g',           label:'🍞 Kohlenhydrate (g)',  step:'1' },
+    { key:'fat_g',            label:'🥑 Fett (g)',           step:'1' },
+    { key:'fiber_g',          label:'🌿 Ballaststoffe (g)',  step:'1' },
+    { key:'zucker_g',         label:'🍬 Zucker (g)',         step:'1' },
+    { key:'gi_avg_target',    label:'📊 GI Ø Ziel',         step:'1' },
+    { key:'gl_daily_target',  label:'📊 GL Tag Ziel',       step:'1' },
+    { key:'vitamin_c_mg',     label:'🍊 Vitamin C (mg)',     step:'1' },
+    { key:'vitamin_a_rae_ug', label:'👁️ Vitamin A (µg)',    step:'1' },
+    { key:'vitamin_d_iu',     label:'☀️ Vitamin D (IU)',    step:'1' },
+    { key:'vitamin_k_ug',     label:'🥬 Vitamin K (µg)',    step:'1' },
+    { key:'vitamin_b12_ug',   label:'🔵 Vitamin B12 (µg)',  step:'0.1' },
+    { key:'folsaeure_ug',     label:'🧬 Folsäure (µg)',     step:'1' },
+    { key:'calcium_mg',       label:'🦴 Calcium (mg)',       step:'1' },
+    { key:'iron_mg',          label:'🩸 Eisen (mg)',         step:'0.1' },
+    { key:'zinc_mg',          label:'⚡ Zink (mg)',          step:'0.1' },
+    { key:'magnesium_mg',     label:'⚙️ Magnesium (mg)',    step:'1' },
+    { key:'kalium_mg',        label:'🫀 Kalium (mg)',        step:'1' },
+    { key:'natrium_mg',       label:'🧂 Natrium (mg)',       step:'1' },
+    { key:'omega3_g',         label:'🐟 Omega 3 (g)',        step:'0.1' },
+    { key:'selene_ug',        label:'🛡️ Selen (µg)',        step:'0.1' },
+    { key:'jod_ug',           label:'🌊 Jod (µg)',           step:'1' },
+    { key:'tryptophan_mg',    label:'💤 Tryptophan (mg)',    step:'1' },
+    { key:'lysine_mg',        label:'🔗 Lysin (mg)',         step:'1' },
   ];
 
   const rows = fields.map(f =>
-    `<div class="row" style="margin-bottom:10px;">
-      <div style="flex:1;display:flex;align-items:center;font-size:13px;color:var(--text2);">${f.label}</div>
+    `<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+      <div style="flex:1;font-size:13px;color:var(--text2);">${f.label}</div>
       <input class="form-input" type="number" step="${f.step}" id="tz_${f.key}"
         value="${parseFloat(target[f.key])||''}" placeholder="–"
-        style="width:100px;flex:none;text-align:right;padding:8px 10px;">
+        style="width:90px;flex:none;text-align:right;padding:8px 10px;">
     </div>`
   ).join('');
 
-  document.getElementById('tageszieleName').textContent = state.dayType;
-  document.getElementById('tagesziele_fields').innerHTML = rows;
-  openModal('tageszielModal');
+  document.getElementById('tageszielModal').querySelector('.modal').innerHTML = `
+    <div class="modal-handle"></div>
+    <button class="modal-close" onclick="closeModal('tageszielModal')">✕</button>
+    <div class="modal-title">🎯 Tagesziele</div>
+
+    <!-- Tagestyp Tabs -->
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;">${tabs}</div>
+
+    <!-- Aktiver Tagestyp: Umbenennen / Löschen -->
+    <div style="display:flex;gap:8px;margin-bottom:16px;">
+      <input class="form-input" id="tz_rename" value="${state.dayType}"
+        style="flex:1;padding:8px 10px;font-size:13px;" placeholder="Name">
+      <button onclick="renameTarget()" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:13px;color:var(--text);cursor:pointer;">✏️</button>
+      ${canDelete ? `<button onclick="deleteTarget()" style="background:rgba(245,122,122,0.1);border:1px solid rgba(245,122,122,0.3);border-radius:8px;padding:8px 12px;font-size:13px;color:var(--danger);cursor:pointer;">🗑️</button>` : ''}
+      ${canAdd ? `<button onclick="addTarget()" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:13px;color:var(--accent);cursor:pointer;">＋</button>` : ''}
+    </div>
+
+    <!-- Zielwerte -->
+    <div style="max-height:50vh;overflow-y:auto;">${rows}</div>
+    <button class="btn btn-primary" onclick="saveTagesziele()" style="margin-top:12px;">Speichern ✓</button>
+  `;
+}
+
+async function renameTarget() {
+  const newName = document.getElementById('tz_rename').value.trim();
+  if (!newName || newName === state.dayType) return;
+  const sheetId = SHEETS.targets !== SHEETS_BASE.targets ? SHEETS.targets : '';
+  try {
+    await fetch(APPS_SCRIPT_URL, {
+      method: 'POST', mode: 'no-cors',
+      headers: {'Content-Type':'text/plain'},
+      body: JSON.stringify({ action: 'updateTarget', dayType: state.dayType, fields: { date: newName }, sheetId: sheetId || undefined })
+    });
+    const t = state.targets.find(t => t.date === state.dayType);
+    if (t) t.date = newName;
+    state.dayType = newName;
+    document.getElementById('dayTypeBadge').textContent = '📅 ' + newName;
+    renderTageszielModal(getTodayTarget());
+  } catch(e) { alert('Fehler: ' + e.message); }
+}
+
+async function addTarget() {
+  if (state.targets.length >= 5) return;
+  const newName = prompt('Name für neuen Tagestyp:', 'Neuer Tag');
+  if (!newName) return;
+  const sheetId = SHEETS.targets !== SHEETS_BASE.targets ? SHEETS.targets : '';
+  // Kopiere Werte vom aktuellen Tagestyp als Vorlage
+  const template = { ...getTodayTarget(), date: newName };
+  const row = Object.values(template);
+  try {
+    await fetch(APPS_SCRIPT_URL, {
+      method: 'POST', mode: 'no-cors',
+      headers: {'Content-Type':'text/plain'},
+      body: JSON.stringify({ action: 'addTarget', row, sheetId: sheetId || undefined })
+    });
+    state.targets.push(template);
+    state.dayType = newName;
+    renderTageszielModal(getTodayTarget());
+    renderToday();
+  } catch(e) { alert('Fehler: ' + e.message); }
+}
+
+async function deleteTarget() {
+  if (state.targets.length <= 1) return;
+  if (!confirm(`"${state.dayType}" wirklich löschen?`)) return;
+  const sheetId = SHEETS.targets !== SHEETS_BASE.targets ? SHEETS.targets : '';
+  try {
+    await fetch(APPS_SCRIPT_URL, {
+      method: 'POST', mode: 'no-cors',
+      headers: {'Content-Type':'text/plain'},
+      body: JSON.stringify({ action: 'deleteTarget', dayType: state.dayType, sheetId: sheetId || undefined })
+    });
+    state.targets = state.targets.filter(t => t.date !== state.dayType);
+    state.dayType = state.targets[0].date;
+    renderTageszielModal(getTodayTarget());
+    renderToday();
+  } catch(e) { alert('Fehler: ' + e.message); }
 }
 
 async function saveTagesziele() {
