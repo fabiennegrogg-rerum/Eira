@@ -1986,8 +1986,15 @@ function showQualityTab(tab) {
 }
 
 function showNewFoodsTab(el) {
+  // Debug: zeige was im ersten Food-Objekt steht
+  const sampleKeys = state.foods.length ? Object.keys(state.foods[0]) : [];
+  const hasCreatedBy = sampleKeys.includes('created_by');
+
   const newFoods = state.foods
-    .filter(f => f.created_by && f.created_by.trim() !== '')
+    .filter(f => {
+      const cb = (f.created_by || '').toString().trim();
+      return cb !== '' && cb !== 'undefined';
+    })
     .sort((a,b) => (a.name||'').localeCompare(b.name||''));
 
   if (!newFoods.length) {
@@ -1995,6 +2002,7 @@ function showNewFoodsTab(el) {
       <div style="font-size:40px;margin-bottom:12px;">✅</div>
       <div style="font-weight:600;">Keine neuen Lebensmittel</div>
       <div style="font-size:13px;color:var(--text2);margin-top:8px;">Noch nichts von Nutzern erfasst</div>
+      ${!hasCreatedBy ? `<div style="font-size:11px;color:var(--danger);margin-top:8px;">⚠️ Spalte "created_by" nicht im Sheet gefunden.<br>Verfügbare Spalten: ${sampleKeys.slice(-5).join(', ')}</div>` : ''}
     </div>`;
     return;
   }
