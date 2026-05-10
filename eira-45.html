@@ -1517,45 +1517,6 @@ async function toggleFavourite(recipeId) {
   } catch(e) { alert('Fehler: ' + e.message); }
 }
 
-  // Status badge helper
-  const statusBadge = (r) => {
-    if (r.status === 'public') return '';
-    if (r.status === 'pending') return `<span style="background:rgba(245,200,122,0.2);color:var(--accent2);border-radius:4px;padding:2px 6px;font-size:10px;font-weight:600;">⏳ Ausstehend</span>`;
-    return `<span style="background:rgba(122,200,245,0.2);color:var(--accent3);border-radius:4px;padding:2px 6px;font-size:10px;font-weight:600;">🔒 Privat</span>`;
-  };
-
-  let html = '';
-  visible.forEach(r => {
-    const items = state.recipeItems.filter(ri => ri.recipe_id === r.recipe_id);
-    const ownRecipe = r.created_by === currentUser?.user_id;
-    const canEdit = adminUser || ownRecipe;
-    const canDelete = adminUser || ownRecipe;
-
-    html += `<div class="card">
-      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;">
-        <div style="flex:1;">
-          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:3px;">
-            <div style="font-weight:600;font-size:15px;">${r.name||'–'}</div>
-            ${statusBadge(r)}
-            ${r.is_favorite==='TRUE' ? '<span style="color:var(--accent2);">★</span>' : ''}
-          </div>
-          <div style="font-size:12px;color:var(--text2);">${r.serving_yield||1} Portion(en) · ${items.length} Zutaten${r.season_tag ? ' · '+r.season_tag : ''}${r.created_by && adminUser ? ' · von '+r.created_by : ''}</div>
-        </div>
-        <div style="display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end;">
-          ${canEdit ? `<button onclick="showEditRecipeModal('${r.recipe_id}')" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:11px;color:var(--text2);cursor:pointer;">✏️</button>` : ''}
-          ${canEdit ? `<button onclick="duplicateRecipe('${r.recipe_id}')" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:11px;color:var(--text2);cursor:pointer;">⊕</button>` : ''}
-          ${canDelete ? `<button onclick="deleteRecipe('${r.recipe_id}','${r.name}')" style="background:rgba(245,122,122,0.1);border:1px solid rgba(245,122,122,0.3);border-radius:6px;padding:4px 8px;font-size:11px;color:var(--danger);cursor:pointer;">🗑️</button>` : ''}
-          ${ownRecipe && r.status === 'private' ? `<button onclick="submitRecipe('${r.recipe_id}')" style="background:rgba(200,245,122,0.15);border:1px solid var(--accent);border-radius:6px;padding:4px 8px;font-size:11px;color:var(--accent);cursor:pointer;">📤 Einreichen</button>` : ''}
-          ${adminUser && r.status === 'pending' ? `<button onclick="approveRecipe('${r.recipe_id}')" style="background:rgba(200,245,122,0.15);border:1px solid var(--accent);border-radius:6px;padding:4px 8px;font-size:11px;color:var(--accent);cursor:pointer;">✅ Freigeben</button>` : ''}
-          ${adminUser && r.status === 'pending' ? `<button onclick="rejectRecipe('${r.recipe_id}')" style="background:rgba(245,122,122,0.1);border:1px solid rgba(245,122,122,0.3);border-radius:6px;padding:4px 8px;font-size:11px;color:var(--danger);cursor:pointer;">❌ Ablehnen</button>` : ''}
-        </div>
-      </div>
-      ${r.notes ? `<div style="font-size:12px;color:var(--text2);margin-top:8px;">${r.notes}</div>` : ''}
-    </div>`;
-  });
-  document.getElementById('recipesContent').innerHTML = html;
-}
-
 async function submitRecipe(recipeId) {
   if (!confirm('Rezept zur Freigabe einreichen?')) return;
   try {
