@@ -541,6 +541,16 @@
 
 <div class="page" id="page-history">
   <p class="section-title">Verlauf</p>
+  <!-- Monats-Chart -->
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:16px;margin-bottom:16px;">
+    <div style="font-size:13px;color:var(--text2);margin-bottom:12px;">📈 Monatsverlauf</div>
+    <canvas id="monthlyChart" height="120" style="width:100%;"></canvas>
+    <div style="display:flex;gap:16px;margin-top:8px;font-size:11px;">
+      <span id="chartLegendA" style="color:var(--accent);">● Fokus A</span>
+      <span id="chartLegendB" style="color:var(--accent3);">● Fokus B</span>
+    </div>
+  </div>
+  <!-- Datumswahl -->
   <div class="form-group">
     <label class="form-label">Datum wählen</label>
     <input class="form-input" type="date" id="historyDate" onchange="loadHistoryDay(this.value)">
@@ -2057,6 +2067,7 @@ function showPage(name, btn) {
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('page-' + name).classList.add('active');
   btn.classList.add('active');
+  if (name === 'history') setTimeout(renderMonthlyChart, 100);
 }
 function openModal(id) { document.getElementById(id).classList.add('open'); }
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
@@ -2507,13 +2518,167 @@ async function updatePortionG(foodId, newPortion) {
 // ============================================================
 // HISTORY
 // ============================================================
+function calcDayMacros(dayLogs) {
+  let m = { kcal:0, protein:0, carb:0, fat:0, fiber:0, iron:0, vitc:0, calcium:0, zinc:0, omega3:0, vitA:0, gl:0, giWeightedSum:0, giCarbSum:0, zucker:0, magnesium:0, kalium:0, natrium:0, vitD:0, vitK:0, vitB12:0, folsaeure:0, selen:0, jod:0, tryptophan:0, lysine:0 };
+  dayLogs.forEach(log => {
+    if (log.item_type === 'food') {
+      const food = state.foods.find(f => f.food_id === log.food_ref || f.food_id === log.item_id);
+      if (!food) return;
+      const factor = (parseFloat(log.grams)||parseFloat(log.portion_pick)||100) / 100;
+      m.protein += (parseFloat(food.protein_g)||0) * factor;
+      m.carb    += (parseFloat(food.carb_g)||0) * factor;
+      m.fat     += (parseFloat(food.fat_g)||0) * factor;
+      m.fiber   += (parseFloat(food.fiber_g)||0) * factor;
+      m.iron    += (parseFloat(food.iron_mg)||0) * factor;
+      m.vitc    += (parseFloat(food.vitamin_c_mg)||0) * factor;
+      m.calcium += (parseFloat(food.calcium_mg)||0) * factor;
+      m.zinc    += (parseFloat(food.zinc_mg)||0) * factor;
+      m.omega3  += (parseFloat(food.omega3_g)||0) * factor;
+      m.vitA    += (parseFloat(food.vitamin_a_rae_ug)||0) * factor;
+      m.zucker  += (parseFloat(food.zucker_g)||0) * factor;
+      m.magnesium += (parseFloat(food.magnesium_g)||0) * factor;
+      m.kalium  += (parseFloat(food.kalium_mg)||0) * factor;
+      m.kcal    += ((parseFloat(food.protein_g)||0)*4 + (parseFloat(food.carb_g)||0)*4 + (parseFloat(food.fat_g)||0)*9) * factor;
+      const gl = parseFloat(food.gl)||0;
+      if (gl > 0) m.gl += gl * factor;
+      const gi = parseFloat(food.gi)||0;
+      const carbs = (parseFloat(food.carb_g)||0) * factor;
+      if (gi > 0 && carbs > 0) { m.giWeightedSum += gi * carbs; m.giCarbSum += carbs; }
+    } else if (log.item_type === 'recipe') {
+      const servings = parseFloat(log.servings)||1;
+      const recipeId = log.recipe_ref || log.item_id;
+      const recipe = state.recipes.find(r => r.recipe_id === recipeId);
+      const yield_ = recipe ? (parseFloat(recipe.serving_yield)||1) : 1;
+      state.recipeItems.filter(ri => ri.recipe_id === recipeId).forEach(ri => {
+        const food = state.foods.find(f => f.food_id === ri.food_id);
+        if (!food) return;
+        const factor = (parseFloat(ri.grams)||0) * servings / yield_ / 100;
+        m.protein += (parseFloat(food.protein_g)||0) * factor;
+        m.carb    += (parseFloat(food.carb_g)||0) * factor;
+        m.fat     += (parseFloat(food.fat_g)||0) * factor;
+        m.fiber   += (parseFloat(food.fiber_g)||0) * factor;
+        m.iron    += (parseFloat(food.iron_mg)||0) * factor;
+        m.vitc    += (parseFloat(food.vitamin_c_mg)||0) * factor;
+        m.calcium += (parseFloat(food.calcium_mg)||0) * factor;
+        m.zinc    += (parseFloat(food.zinc_mg)||0) * factor;
+        m.omega3  += (parseFloat(food.omega3_g)||0) * factor;
+        m.vitA    += (parseFloat(food.vitamin_a_rae_ug)||0) * factor;
+        m.kcal    += ((parseFloat(food.protein_g)||0)*4 + (parseFloat(food.carb_g)||0)*4 + (parseFloat(food.fat_g)||0)*9) * factor;
+      });
+    }
+  });
+  return m;
+}
+
+function renderMonthlyChart() {
+  const canvas = document.getElementById('monthlyChart');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.offsetWidth || 300;
+  const H = 120;
+  canvas.width = W;
+  canvas.height = H;
+
+  // Get current month days
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth();
+  const daysInMonth = new Date(year, month+1, 0).getDate();
+  const today = now.getDate();
+
+  // Get focusA and focusB macro keys
+  const MACRO_VAL_MAP = { protein:'protein', fiber:'fiber', fat:'fat', carb:'carb', kcal:'kcal' };
+  const keyA = MACRO_VAL_MAP[layout.focusA] || layout.focusA;
+  const keyB = MACRO_VAL_MAP[layout.focusB] || layout.focusB;
+  const optA = MACRO_OPTIONS.find(o=>o.key===layout.focusA);
+  const optB = MACRO_OPTIONS.find(o=>o.key===layout.focusB);
+
+  // Update legend
+  const legA = document.getElementById('chartLegendA');
+  const legB = document.getElementById('chartLegendB');
+  if (legA) legA.textContent = `● ${optA?.label||layout.focusA}`;
+  if (legB) legB.textContent = `● ${optB?.label||layout.focusB}`;
+
+  // Calculate daily values
+  const valuesA = [], valuesB = [], labels = [];
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const dayLogs = state.logs.filter(l => (l.date||'').startsWith(dateStr));
+    const m = calcDayMacros(dayLogs);
+    valuesA.push(m[keyA] || 0);
+    valuesB.push(m[keyB] || 0);
+    labels.push(d);
+  }
+
+  const maxVal = Math.max(...valuesA, ...valuesB, 1);
+  const pad = { top:10, right:10, bottom:20, left:32 };
+  const chartW = W - pad.left - pad.right;
+  const chartH = H - pad.top - pad.bottom;
+
+  ctx.clearRect(0, 0, W, H);
+
+  // Grid lines
+  ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+  ctx.lineWidth = 1;
+  [0.25, 0.5, 0.75, 1].forEach(p => {
+    const y = pad.top + chartH * (1-p);
+    ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(W-pad.right, y); ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.font = '9px sans-serif';
+    ctx.fillText(Math.round(maxVal*p), 2, y+3);
+  });
+
+  // Draw line helper
+  const drawLine = (values, color) => {
+    ctx.beginPath();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.lineJoin = 'round';
+    values.forEach((v, i) => {
+      const x = pad.left + (i / (daysInMonth-1)) * chartW;
+      const y = pad.top + chartH * (1 - v/maxVal);
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    // Dots for days with data
+    values.forEach((v, i) => {
+      if (v === 0) return;
+      const x = pad.left + (i / (daysInMonth-1)) * chartW;
+      const y = pad.top + chartH * (1 - v/maxVal);
+      ctx.beginPath();
+      ctx.arc(x, y, 3, 0, Math.PI*2);
+      ctx.fillStyle = color;
+      ctx.fill();
+    });
+  };
+
+  drawLine(valuesA, '#c8f57a');
+  drawLine(valuesB, '#7ac8f5');
+
+  // Today marker
+  const todayX = pad.left + ((today-1) / (daysInMonth-1)) * chartW;
+  ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([3,3]);
+  ctx.beginPath(); ctx.moveTo(todayX, pad.top); ctx.lineTo(todayX, H-pad.bottom); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // X-axis labels (every 5 days)
+  ctx.fillStyle = 'rgba(255,255,255,0.4)';
+  ctx.font = '9px sans-serif';
+  ctx.textAlign = 'center';
+  for (let d = 1; d <= daysInMonth; d+=5) {
+    const x = pad.left + ((d-1)/(daysInMonth-1)) * chartW;
+    ctx.fillText(d, x, H-4);
+  }
+}
+
 function loadHistoryDay(dateStr) {
   if (!dateStr) return;
   const el = document.getElementById('historyContent');
   el.innerHTML = '<div class="loading"><div class="spinner"></div>Lade...</div>';
 
   setTimeout(() => {
-    // Filter logs for selected date
     const dayLogs = state.logs.filter(l => {
       const d = l.date || '';
       return d.startsWith(dateStr) || d.includes(dateStr);
@@ -2524,48 +2689,72 @@ function loadHistoryDay(dateStr) {
       return;
     }
 
-    // Calculate macros for this day
-    let macros = { protein:0, carb:0, fat:0, fiber:0, iron:0 };
-    dayLogs.forEach(log => {
-      if (log.item_type === 'food') {
-        const food = state.foods.find(f => f.food_id === log.food_ref || f.food_id === log.item_id);
-        if (!food) return;
-        const grams = parseFloat(log.grams) || parseFloat(log.portion_pick) || 100;
-        const factor = grams / 100;
-        macros.protein += (parseFloat(food.protein_g)||0) * factor;
-        macros.carb += (parseFloat(food.carb_g)||0) * factor;
-        macros.fat += (parseFloat(food.fat_g)||0) * factor;
-        macros.fiber += (parseFloat(food.fiber_g)||0) * factor;
-        macros.iron += (parseFloat(food.iron_mg)||0) * factor;
-      } else if (log.item_type === 'recipe') {
-        const servings = parseFloat(log.servings) || 1;
-        const recipeId = log.recipe_ref || log.item_id;
-        const recipe = state.recipes.find(r => r.recipe_id === recipeId);
-        const yield_ = recipe ? (parseFloat(recipe.serving_yield)||1) : 1;
-        const items = state.recipeItems.filter(ri => ri.recipe_id === recipeId);
-        items.forEach(ri => {
-          const food = state.foods.find(f => f.food_id === ri.food_id);
-          if (!food) return;
-          const grams = (parseFloat(ri.grams)||0) * servings / yield_;
-          const factor = grams / 100;
-          macros.protein += (parseFloat(food.protein_g)||0) * factor;
-          macros.carb += (parseFloat(food.carb_g)||0) * factor;
-          macros.fat += (parseFloat(food.fat_g)||0) * factor;
-          macros.fiber += (parseFloat(food.fiber_g)||0) * factor;
-          macros.iron += (parseFloat(food.iron_mg)||0) * factor;
-        });
-      }
-    });
-
-    const fmt = v => Math.round(v * 10) / 10;
+    const macros = calcDayMacros(dayLogs);
     const target = getTodayTarget();
-    const fiberTarget = parseFloat(target.fiber_g) || 30;
-    const pct = (v, t) => Math.min(100, Math.round(v / t * 100));
+    const fmt = v => Math.round(v * 10) / 10;
 
-    // Group by meal
+    // Render macro tiles like Heute page (without targets)
+    const tileHTML = (label, val, unit, color) =>
+      `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px;">
+        <div class="macro-label">${label}</div>
+        <div style="font-size:18px;font-weight:700;color:${color};">${val}<span style="font-size:11px;color:var(--text2)">${unit}</span></div>
+      </div>`;
+
+    const giVal = macros.giCarbSum > 0 ? Math.round(macros.giWeightedSum / macros.giCarbSum) : null;
+    const glVal = macros.gl > 0 ? Math.round(macros.gl) : null;
+
+    // Top 3 small tiles
+    const top3 = `
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px;">
+        ${tileHTML('🔥 Kalorien', Math.round(macros.kcal), 'kcal', 'var(--accent2)')}
+        ${tileHTML('🍞 KH', fmt(macros.carb), 'g', 'var(--accent2)')}
+        ${tileHTML('🥑 Fett', fmt(macros.fat), 'g', '#f57ac8')}
+      </div>`;
+
+    // Focus A large tile
+    const focusAMacroMap = { protein:'protein', fiber:'fiber', fat:'fat', carb:'carb', kcal:'kcal' };
+    const focusAVal = macros[focusAMacroMap[layout.focusA]] || 0;
+    const focusBVal = macros[focusAMacroMap[layout.focusB]] || 0;
+    const optA = [...MACRO_OPTIONS, ...MICRO_OPTIONS].find(o=>o.key===layout.focusA);
+    const optB = [...MACRO_OPTIONS, ...MICRO_OPTIONS].find(o=>o.key===layout.focusB);
+
+    const focusA = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:16px;margin-bottom:8px;">
+      <div class="macro-label">${optA?.label||layout.focusA}</div>
+      <div style="font-family:'DM Serif Display',serif;font-size:40px;color:var(--accent);line-height:1;">${fmt(focusAVal)}<span style="font-size:16px;color:var(--text2)">${optA?.unit||'g'}</span></div>
+    </div>`;
+
+    const focusB = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:16px;">
+      <div class="macro-label">${optB?.label||layout.focusB}</div>
+      <div style="font-family:'DM Serif Display',serif;font-size:36px;color:var(--accent3);line-height:1;">${fmt(focusBVal)}<span style="font-size:14px;color:var(--text2)">${optB?.unit||'g'}</span></div>
+    </div>`;
+
+    // GI/GL
+    const gigl = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px;">
+      <div class="macro-label">📊 GI Ø</div>
+      <div style="font-size:20px;font-weight:700;color:${giVal?(giVal<=55?'var(--accent)':giVal<=70?'var(--accent2)':'var(--danger)'):'var(--text2)'};">${giVal??'–'}</div>
+      <div style="margin-top:6px;font-size:10px;color:var(--text2);">GL Tag</div>
+      <div style="font-size:18px;font-weight:700;">${glVal??'–'}</div>
+    </div>`;
+
+    // Micro tiles (from layout)
+    const microHTML = `<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px;">
+      ${layout.micros.slice(0,3).map(k => {
+        const o = MICRO_OPTIONS.find(x=>x.key===k);
+        const v = macros[k] || 0;
+        return tileHTML(o?.label||k, fmt(v), o?.unit||'', 'var(--text)');
+      }).join('')}
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:16px;">
+      ${layout.micros.slice(3,6).map(k => {
+        const o = MICRO_OPTIONS.find(x=>x.key===k);
+        const v = macros[k] || 0;
+        return tileHTML(o?.label||k, fmt(v), o?.unit||'', 'var(--text)');
+      }).join('')}
+    </div>`;
+
+    // Meals
     const meals = ['Frühstück','Znüni','Mittagessen','Zvieri','Abendessen'];
     const mealEmojis = {'Frühstück':'🌅','Znüni':'🍎','Mittagessen':'☀️','Zvieri':'🍇','Abendessen':'🌙'};
-
     let mealsHTML = '';
     meals.forEach(meal => {
       const entries = dayLogs.filter(l => l.meal === meal);
@@ -2597,34 +2786,13 @@ function loadHistoryDay(dateStr) {
     });
 
     el.innerHTML = `
-      <div class="card">
-        <div class="fiber-hero">
-          <div class="number">${fmt(macros.fiber)}<span class="unit">g</span></div>
-          <div class="label">Ballaststoffe</div>
-          <div class="target-line">Ziel: <span>${fiberTarget}g</span> · ${pct(macros.fiber, fiberTarget)}% erreicht</div>
-        </div>
-        <div class="macro-bar" style="height:6px;margin-top:12px;">
-          <div class="macro-bar-fill" style="background:var(--accent);width:${pct(macros.fiber,fiberTarget)}%"></div>
-        </div>
+      ${top3}
+      ${focusA}
+      <div style="display:grid;grid-template-columns:2fr 1fr;gap:8px;margin-bottom:8px;">
+        ${focusB}
+        ${gigl}
       </div>
-      <div class="macro-grid">
-        <div class="macro-item protein">
-          <div class="macro-label">Protein</div>
-          <div class="macro-value">${fmt(macros.protein)}<span style="font-size:13px;color:var(--text2)">g</span></div>
-        </div>
-        <div class="macro-item carb">
-          <div class="macro-label">Kohlenhydrate</div>
-          <div class="macro-value">${fmt(macros.carb)}<span style="font-size:13px;color:var(--text2)">g</span></div>
-        </div>
-        <div class="macro-item fat">
-          <div class="macro-label">Fett</div>
-          <div class="macro-value">${fmt(macros.fat)}<span style="font-size:13px;color:var(--text2)">g</span></div>
-        </div>
-        <div class="macro-item">
-          <div class="macro-label">Eisen</div>
-          <div class="macro-value">${fmt(macros.iron)}<span style="font-size:13px;color:var(--text2)">mg</span></div>
-        </div>
-      </div>
+      ${microHTML}
       <div class="card">
         <div class="card-title">Mahlzeiten</div>
         ${mealsHTML || '<div class="empty-state">Keine Mahlzeiten erfasst</div>'}
