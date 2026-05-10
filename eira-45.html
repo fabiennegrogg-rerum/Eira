@@ -563,10 +563,32 @@
 
 <div class="page" id="page-recipes">
   <p class="section-title">Rezepte</p>
-  <div style="display:flex;gap:8px;margin-bottom:16px;">
+  <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
     <button class="btn btn-primary btn-sm" onclick="showAddRecipeModal()">+ Neu</button>
+    <button id="recipeFilterFav" class="btn btn-secondary btn-sm" onclick="setRecipeFilter('favourites')">❤️ Favoriten</button>
+  </div>
+  <!-- Meal type filter -->
+  <div style="display:flex;gap:6px;margin-bottom:12px;overflow-x:auto;padding-bottom:4px;" id="mealTypeFilters">
+    <button class="chip selected" onclick="setRecipeFilter('all')">Alle</button>
+    <button class="chip" onclick="setRecipeFilter('Frühstück')">🌅 Frühstück</button>
+    <button class="chip" onclick="setRecipeFilter('Brunch')">🥐 Brunch</button>
+    <button class="chip" onclick="setRecipeFilter('Snack salzig')">🧀 Snack</button>
+    <button class="chip" onclick="setRecipeFilter('Snack süss')">🍪 Süss</button>
+    <button class="chip" onclick="setRecipeFilter('Hauptmahlzeit')">🍽️ Haupt</button>
+    <button class="chip" onclick="setRecipeFilter('Dessert')">🍮 Dessert</button>
+    <button class="chip" onclick="setRecipeFilter('Sauce')">🫙 Sauce</button>
+    <button class="chip" onclick="setRecipeFilter('Getränk')">🥤 Getränk</button>
   </div>
   <div id="recipesContent"><div class="loading"><div class="spinner"></div>Lade Rezepte...</div></div>
+</div>
+
+<!-- Modal: Recipe Detail -->
+<div class="modal-overlay" id="recipeDetailModal">
+  <div class="modal" style="position:relative;max-height:92vh;overflow-y:auto;">
+    <div class="modal-handle"></div>
+    <button class="modal-close" onclick="closeModal('recipeDetailModal')">✕</button>
+    <div id="recipeDetailContent"></div>
+  </div>
 </div>
 
 <!-- Bottom Nav -->
@@ -756,13 +778,14 @@
 // CONFIG
 // ============================================================
 const API_KEY = 'AIzaSyCg78COwFI-j_vbM4ychrgMv78ArRGXPBw';
-const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzl7vT1jCoiIE4qbkHQCNb7TPUPkZBrnsxLHxKAAINDcNlAcBsW2t3SP4FG_3uVXhA/exec';
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbws1PYbYcdf3oWSOU3fgE2FBMwfB4LbKqZI7BkIqUK45xiXY_bONV79h2CcX3evNETJ/exec';
 const SHEETS_BASE = {
-  foods:         '1h59YPkiStd4xFDClRowrT6PEKVMRDYjOazdbS8nG1nk',
-  recipes:       '1HcUVFI9I8Fm6uU7m9ZgC3u8FolwulTbDGkE21hA08aI',
-  recipe_items:  '1WMZXlCa9FnbaDpK0q_YG98s0Wad7BYowx3s6_8HdRvc',
-  gi_table:      '1_SCXrsTPMUxf6OJOeDY3vPK2Z_GcQfylXOLG5H76E1c',
-  users:         '1Wq4HjrLpwskmyM86W0SVhyM7EGZru9fLj4XcHO0CUgo'
+  foods:          '1h59YPkiStd4xFDClRowrT6PEKVMRDYjOazdbS8nG1nk',
+  recipes:        '1HcUVFI9I8Fm6uU7m9ZgC3u8FolwulTbDGkE21hA08aI',
+  recipe_items:   '1WMZXlCa9FnbaDpK0q_YG98s0Wad7BYowx3s6_8HdRvc',
+  recipe_ratings: '1uo8BdYDkdv7elsDVwaaBdHYP15zef7FBIOjhIFZ4uBM',
+  gi_table:       '1_SCXrsTPMUxf6OJOeDY3vPK2Z_GcQfylXOLG5H76E1c',
+  users:          '1Wq4HjrLpwskmyM86W0SVhyM7EGZru9fLj4XcHO0CUgo'
 };
 
 // User-specific sheets - will be set after login
@@ -781,6 +804,7 @@ let state = {
   foods: [],
   recipes: [],
   recipeItems: [],
+  recipeRatings: [],
   logs: [],
   targets: [],
   todayLogs: [],
@@ -790,7 +814,8 @@ let state = {
   selectedFood: null,
   selectedRecipe: null,
   newRecipeIngredients: [],
-  currentLogTab: 'food'
+  currentLogTab: 'food',
+  recipeFilter: 'all'
 };
 
 const today = new Date().toLocaleDateString('de-CH', {day:'2-digit',month:'2-digit',year:'numeric'});
@@ -865,19 +890,21 @@ function rowsToObjects(rows) {
 async function loadAll() {
   try {
     // allSettled: ein fehlgeschlagenes Sheet bricht nicht alles ab
-    const [foodRes, recipeRes, recipeItemRes, logRes, targetRes] = await Promise.allSettled([
+    const [foodRes, recipeRes, recipeItemRes, logRes, targetRes, ratingsRes] = await Promise.allSettled([
       fetchSheet(SHEETS.foods),
       fetchSheet(SHEETS.recipes),
       fetchSheet(SHEETS.recipe_items),
       fetchSheet(SHEETS.logs),
-      fetchSheet(SHEETS.targets)
+      fetchSheet(SHEETS.targets),
+      fetchSheet(SHEETS_BASE.recipe_ratings)
     ]);
 
-    state.foods      = foodRes.status==='fulfilled'      ? rowsToObjects(foodRes.value)       : [];
-    state.recipes    = recipeRes.status==='fulfilled'    ? rowsToObjects(recipeRes.value)     : [];
-    state.recipeItems= recipeItemRes.status==='fulfilled'? rowsToObjects(recipeItemRes.value) : [];
-    state.logs       = logRes.status==='fulfilled'       ? rowsToObjects(logRes.value)        : [];
-    state.targets    = targetRes.status==='fulfilled'    ? rowsToObjects(targetRes.value)     : [];
+    state.foods         = foodRes.status==='fulfilled'      ? rowsToObjects(foodRes.value)       : [];
+    state.recipes       = recipeRes.status==='fulfilled'    ? rowsToObjects(recipeRes.value)     : [];
+    state.recipeItems   = recipeItemRes.status==='fulfilled'? rowsToObjects(recipeItemRes.value) : [];
+    state.logs          = logRes.status==='fulfilled'       ? rowsToObjects(logRes.value)        : [];
+    state.targets       = targetRes.status==='fulfilled'    ? rowsToObjects(targetRes.value)     : [];
+    state.recipeRatings = ratingsRes.status==='fulfilled'   ? rowsToObjects(ratingsRes.value)    : [];
 
     // Filter today's logs
     state.todayLogs = state.logs.filter(l => {
@@ -1171,6 +1198,74 @@ function filterFoods(val) { renderFoods(val); }
 // ============================================================
 // RECIPES PAGE
 // ============================================================
+// ============================================================
+// RECIPE HELPERS
+// ============================================================
+function calcRecipeMacros(recipeId, servingYield) {
+  const items = state.recipeItems.filter(ri => String(ri.recipe_id).trim() === String(recipeId).trim());
+  const totals = { kcal:0, protein:0, carb:0, fat:0, fiber:0 };
+  items.forEach(ri => {
+    const food = state.foods.find(f => String(f.food_id).trim() === String(ri.food_id).trim());
+    if (!food) return;
+    const g = parseFloat(ri.grams) || 0;
+    const f = g / 100;
+    totals.kcal    += ((parseFloat(food.protein_g)||0)*4 + (parseFloat(food.carb_g)||0)*4 + (parseFloat(food.fat_g)||0)*9) * f;
+    totals.protein += (parseFloat(food.protein_g)||0) * f;
+    totals.carb    += (parseFloat(food.carb_g)||0) * f;
+    totals.fat     += (parseFloat(food.fat_g)||0) * f;
+    totals.fiber   += (parseFloat(food.fiber_g)||0) * f;
+  });
+  const s = Math.max(1, parseFloat(servingYield)||1);
+  return {
+    kcal:    Math.round(totals.kcal/s),
+    protein: Math.round(totals.protein/s*10)/10,
+    carb:    Math.round(totals.carb/s*10)/10,
+    fat:     Math.round(totals.fat/s*10)/10,
+    fiber:   Math.round(totals.fiber/s*10)/10,
+  };
+}
+
+function getAvgRating(recipeId) {
+  const ratings = state.recipeRatings.filter(r => r.recipe_id === recipeId && r.rating);
+  if (!ratings.length) return null;
+  const avg = ratings.reduce((s,r) => s + parseFloat(r.rating||0), 0) / ratings.length;
+  return { avg: Math.round(avg*10)/10, count: ratings.length };
+}
+
+function getUserRating(recipeId) {
+  return state.recipeRatings.find(r => r.recipe_id === recipeId && r.user_id === currentUser?.user_id);
+}
+
+function starsHTML(rating, interactive=false, recipeId='') {
+  const r = Math.round(rating || 0);
+  if (interactive) {
+    return [1,2,3,4,5].map(i =>
+      `<span style="font-size:22px;cursor:pointer;color:${i<=r?'#f5c87a':'var(--border)'}" 
+        onclick="setRating('${recipeId}',${i})">★</span>`
+    ).join('');
+  }
+  return [1,2,3,4,5].map(i =>
+    `<span style="color:${i<=r?'#f5c87a':'var(--border)'}">★</span>`
+  ).join('');
+}
+
+function setRecipeFilter(filter) {
+  state.recipeFilter = filter;
+  // Update chip styles
+  document.querySelectorAll('#mealTypeFilters .chip').forEach(c => c.classList.remove('selected'));
+  const favBtn = document.getElementById('recipeFilterFav');
+  if (filter === 'favourites') {
+    favBtn.className = 'btn btn-primary btn-sm';
+  } else {
+    favBtn.className = 'btn btn-secondary btn-sm';
+    const chips = document.querySelectorAll('#mealTypeFilters .chip');
+    const labels = ['all','Frühstück','Brunch','Snack salzig','Snack süss','Hauptmahlzeit','Dessert','Sauce','Getränk'];
+    const idx = labels.indexOf(filter);
+    if (idx >= 0 && chips[idx]) chips[idx].classList.add('selected');
+  }
+  renderRecipes();
+}
+
 function renderRecipes() {
   const adminUser = isAdmin();
   if (!state.recipes.length) {
@@ -1178,13 +1273,250 @@ function renderRecipes() {
     return;
   }
 
-  // Filter: admin sieht alle, user sieht public + eigene
-  const visible = state.recipes.filter(r => {
-    if (adminUser) return true;
-    if (r.status === 'public') return true;
-    if (r.created_by === currentUser?.user_id) return true;
-    return false;
+  // Filter
+  let visible = state.recipes.filter(r => {
+    if (!adminUser && r.status !== 'public' && r.created_by !== currentUser?.user_id) return false;
+    if (state.recipeFilter === 'favourites') {
+      const ur = getUserRating(r.recipe_id);
+      return ur && ur.is_favourite === 'TRUE';
+    }
+    if (state.recipeFilter && state.recipeFilter !== 'all') {
+      return r.meal_type === state.recipeFilter;
+    }
+    return true;
   }).sort((a,b) => (a.name||'').localeCompare(b.name||''));
+
+  if (!visible.length) {
+    document.getElementById('recipesContent').innerHTML = '<div class="empty-state">Keine Rezepte in dieser Kategorie</div>';
+    return;
+  }
+
+  let html = '';
+  visible.forEach(r => {
+    const macros = calcRecipeMacros(r.recipe_id, r.serving_yield);
+    const ratingInfo = getAvgRating(r.recipe_id);
+    const userRating = getUserRating(r.recipe_id);
+    const isFav = userRating?.is_favourite === 'TRUE';
+    const ownRecipe = r.created_by === currentUser?.user_id;
+    const canEdit = adminUser || ownRecipe;
+
+    const statusBadge = r.status === 'pending'
+      ? `<span style="background:rgba(245,200,122,0.2);color:var(--accent2);border-radius:4px;padding:2px 6px;font-size:10px;font-weight:600;">⏳ Ausstehend</span>`
+      : r.status === 'private'
+      ? `<span style="background:rgba(122,200,245,0.2);color:var(--accent3);border-radius:4px;padding:2px 6px;font-size:10px;font-weight:600;">🔒 Privat</span>`
+      : '';
+
+    const tags = (r.tags||'').split(',').map(t=>t.trim()).filter(Boolean);
+
+    html += `<div class="card" style="cursor:pointer;" onclick="showRecipeDetail('${r.recipe_id}')">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;">
+        <div style="flex:1;min-width:0;">
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px;">
+            <div style="font-weight:600;font-size:15px;">${r.name||'–'}</div>
+            ${statusBadge}
+          </div>
+          <div style="font-size:12px;color:var(--text2);margin-bottom:6px;">
+            ${r.meal_type ? `🍽️ ${r.meal_type} · ` : ''}${r.serving_yield||1} Portion(en)${r.meal_time_min ? ` · ⏱️ ${r.meal_time_min}min` : ''}${r.created_by && adminUser ? ` · von ${r.created_by}` : ''}
+          </div>
+          <!-- Makros -->
+          <div style="display:flex;gap:10px;font-size:12px;margin-bottom:6px;">
+            <span style="color:var(--accent3);font-weight:600;">💪 ${macros.protein}g</span>
+            <span style="color:var(--accent2);font-weight:600;">🔥 ${macros.kcal}kcal</span>
+            <span style="color:var(--accent);font-weight:600;">🌿 ${macros.fiber}g</span>
+          </div>
+          <!-- Tags -->
+          ${tags.length ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:4px;">${tags.map(t=>`<span style="background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:1px 6px;font-size:10px;color:var(--text2);">${t}</span>`).join('')}</div>` : ''}
+          <!-- Rating -->
+          <div style="font-size:13px;">
+            ${ratingInfo ? `<span style="color:#f5c87a;">${'★'.repeat(Math.round(ratingInfo.avg))}${'☆'.repeat(5-Math.round(ratingInfo.avg))}</span> <span style="font-size:11px;color:var(--text2);">${ratingInfo.avg} (${ratingInfo.count})</span>` : '<span style="font-size:11px;color:var(--text2);">Noch keine Bewertung</span>'}
+          </div>
+        </div>
+        <!-- Action buttons -->
+        <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end;" onclick="event.stopPropagation()">
+          <button onclick="toggleFavourite('${r.recipe_id}')" style="background:${isFav?'rgba(245,200,122,0.2)':'var(--surface2)'};border:1px solid ${isFav?'var(--accent2)':'var(--border)'};border-radius:6px;padding:4px 8px;font-size:14px;cursor:pointer;">${isFav?'❤️':'🤍'}</button>
+          ${canEdit ? `<button onclick="showEditRecipeModal('${r.recipe_id}')" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:11px;color:var(--text2);cursor:pointer;">✏️</button>` : ''}
+          ${canEdit ? `<button onclick="duplicateRecipe('${r.recipe_id}')" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:11px;color:var(--text2);cursor:pointer;">⊕</button>` : ''}
+          ${canEdit ? `<button onclick="deleteRecipe('${r.recipe_id}','${r.name}')" style="background:rgba(245,122,122,0.1);border:1px solid rgba(245,122,122,0.3);border-radius:6px;padding:4px 8px;font-size:11px;color:var(--danger);cursor:pointer;">🗑️</button>` : ''}
+          ${ownRecipe && r.status === 'private' ? `<button onclick="submitRecipe('${r.recipe_id}')" style="background:rgba(200,245,122,0.15);border:1px solid var(--accent);border-radius:6px;padding:4px 8px;font-size:11px;color:var(--accent);cursor:pointer;">📤</button>` : ''}
+          ${adminUser && r.status === 'pending' ? `<button onclick="approveRecipe('${r.recipe_id}')" style="background:rgba(200,245,122,0.15);border:1px solid var(--accent);border-radius:6px;padding:4px 8px;font-size:11px;color:var(--accent);cursor:pointer;">✅</button>` : ''}
+          ${adminUser && r.status === 'pending' ? `<button onclick="rejectRecipe('${r.recipe_id}')" style="background:rgba(245,122,122,0.1);border:1px solid rgba(245,122,122,0.3);border-radius:6px;padding:4px 8px;font-size:11px;color:var(--danger);cursor:pointer;">❌</button>` : ''}
+        </div>
+      </div>
+    </div>`;
+  });
+  document.getElementById('recipesContent').innerHTML = html;
+}
+
+function showRecipeDetail(recipeId) {
+  const r = state.recipes.find(r => r.recipe_id === recipeId);
+  if (!r) return;
+
+  const macros = calcRecipeMacros(recipeId, r.serving_yield);
+  const items = state.recipeItems.filter(ri => String(ri.recipe_id).trim() === String(recipeId).trim());
+  const userRating = getUserRating(recipeId);
+  const ratingInfo = getAvgRating(recipeId);
+  const tags = (r.tags||'').split(',').map(t=>t.trim()).filter(Boolean);
+
+  // Instructions — split by newline or \n
+  const steps = (r.instructions||'').split(/\n|\r\n|\r/).filter(s=>s.trim());
+
+  const ingredientsHTML = items.map(ri => {
+    const food = state.foods.find(f => String(f.food_id).trim() === String(ri.food_id).trim());
+    return `<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);">
+      <span style="font-size:14px;">${food?.name || ri.food_id}</span>
+      <span style="font-size:14px;color:var(--text2);font-weight:600;">${ri.grams}g</span>
+    </div>`;
+  }).join('');
+
+  const stepsHTML = steps.length
+    ? steps.map((s,i) => `<div style="display:flex;gap:12px;margin-bottom:12px;">
+        <div style="min-width:24px;height:24px;background:var(--accent);color:#0f0f0e;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0;">${i+1}</div>
+        <div style="font-size:14px;line-height:1.5;">${s.trim()}</div>
+      </div>`).join('')
+    : `<div style="font-size:13px;color:var(--text2);">${r.notes || 'Keine Anleitung vorhanden'}</div>`;
+
+  document.getElementById('recipeDetailContent').innerHTML = `
+    <!-- Header -->
+    <div style="margin-bottom:16px;">
+      <div style="font-size:22px;font-weight:700;margin-bottom:6px;">${r.name}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;">
+        ${r.meal_type ? `<span style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:12px;">🍽️ ${r.meal_type}</span>` : ''}
+        ${r.meal_time_min ? `<span style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:12px;">⏱️ ${r.meal_time_min} min</span>` : ''}
+        ${r.serving_yield ? `<span style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:12px;">🍴 ${r.serving_yield} Portion(en)</span>` : ''}
+        ${r.created_by ? `<span style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:12px;">👤 ${r.created_by}</span>` : ''}
+      </div>
+      ${tags.length ? `<div style="display:flex;flex-wrap:wrap;gap:4px;">${tags.map(t=>`<span style="background:rgba(200,245,122,0.1);border:1px solid rgba(200,245,122,0.3);border-radius:4px;padding:2px 8px;font-size:11px;color:var(--accent);">${t}</span>`).join('')}</div>` : ''}
+    </div>
+
+    <!-- Makros pro Portion -->
+    <div style="background:var(--surface2);border-radius:var(--radius-sm);padding:12px;margin-bottom:16px;">
+      <div style="font-size:12px;color:var(--text2);margin-bottom:8px;">Pro Portion</div>
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px;text-align:center;">
+        <div><div style="font-size:16px;font-weight:700;color:var(--accent2);">${macros.kcal}</div><div style="font-size:10px;color:var(--text2);">kcal</div></div>
+        <div><div style="font-size:16px;font-weight:700;color:var(--accent3);">${macros.protein}g</div><div style="font-size:10px;color:var(--text2);">Protein</div></div>
+        <div><div style="font-size:16px;font-weight:700;">${macros.carb}g</div><div style="font-size:10px;color:var(--text2);">KH</div></div>
+        <div><div style="font-size:16px;font-weight:700;color:#f57ac8;">${macros.fat}g</div><div style="font-size:10px;color:var(--text2);">Fett</div></div>
+        <div><div style="font-size:16px;font-weight:700;color:var(--accent);">${macros.fiber}g</div><div style="font-size:10px;color:var(--text2);">Ballaststoffe</div></div>
+      </div>
+    </div>
+
+    <!-- Zutaten -->
+    <div style="margin-bottom:16px;">
+      <div style="font-weight:600;font-size:15px;margin-bottom:8px;">🥕 Zutaten</div>
+      ${ingredientsHTML || '<div style="font-size:13px;color:var(--text2);">Keine Zutaten</div>'}
+    </div>
+
+    <!-- Zubereitung -->
+    <div style="margin-bottom:16px;">
+      <div style="font-weight:600;font-size:15px;margin-bottom:12px;">📋 Zubereitung</div>
+      ${stepsHTML}
+    </div>
+
+    ${r.notes && r.instructions ? `<div style="background:var(--surface2);border-radius:var(--radius-sm);padding:12px;margin-bottom:16px;">
+      <div style="font-size:12px;color:var(--text2);margin-bottom:4px;">💡 Notiz</div>
+      <div style="font-size:13px;">${r.notes}</div>
+    </div>` : ''}
+
+    <!-- Bewertung -->
+    <div style="background:var(--surface2);border-radius:var(--radius-sm);padding:12px;margin-bottom:16px;">
+      <div style="font-weight:600;font-size:14px;margin-bottom:8px;">⭐ Bewertung</div>
+      ${ratingInfo ? `<div style="font-size:13px;color:var(--text2);margin-bottom:8px;">Ø ${ratingInfo.avg} von ${ratingInfo.count} Bewertung(en)</div>` : ''}
+      <div style="margin-bottom:8px;">${starsHTML(userRating?.rating||0, true, recipeId)}</div>
+      <textarea id="ratingComment_${recipeId}" placeholder="Kommentar / Tipp (optional)" 
+        style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--text);font-size:13px;resize:vertical;min-height:60px;">${userRating?.comment||''}</textarea>
+      <div style="display:flex;gap:8px;margin-top:8px;">
+        <button onclick="saveRating('${recipeId}')" style="background:var(--accent);color:#0f0f0e;border:none;border-radius:8px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer;">Bewertung speichern</button>
+        <button onclick="toggleFavourite('${recipeId}')" style="background:${userRating?.is_favourite==='TRUE'?'rgba(245,200,122,0.2)':'var(--surface)'};border:1px solid ${userRating?.is_favourite==='TRUE'?'var(--accent2)':'var(--border)'};border-radius:8px;padding:8px 14px;font-size:14px;cursor:pointer;">${userRating?.is_favourite==='TRUE'?'❤️ Favorit':'🤍 Favorit'}</button>
+      </div>
+    </div>
+
+    <!-- In Mahlzeit loggen -->
+    <button onclick="closeModal('recipeDetailModal');openAddLog('${state.currentMeal||'Mittagessen'}')" 
+      style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:14px;color:var(--text);cursor:pointer;margin-bottom:8px;">
+      + Zu Mahlzeit hinzufügen
+    </button>
+  `;
+
+  openModal('recipeDetailModal');
+}
+
+async function saveRating(recipeId) {
+  const stars = document.querySelectorAll(`[onclick^="setRating('${recipeId}"]`);
+  let rating = 0;
+  stars.forEach((s,i) => { if (s.style.color === 'rgb(245, 200, 122)') rating = i+1; });
+  const comment = document.getElementById(`ratingComment_${recipeId}`)?.value || '';
+  const existing = getUserRating(recipeId);
+  const isFav = existing?.is_favourite || 'FALSE';
+
+  try {
+    await fetch(APPS_SCRIPT_URL, {
+      method: 'POST', mode: 'no-cors',
+      headers: {'Content-Type':'text/plain'},
+      body: JSON.stringify({
+        action: 'saveRating',
+        user_id: currentUser?.user_id,
+        recipe_id: recipeId,
+        rating, comment,
+        is_favourite: isFav
+      })
+    });
+    // Update local state
+    const idx = state.recipeRatings.findIndex(r => r.recipe_id === recipeId && r.user_id === currentUser?.user_id);
+    const newRating = { user_id: currentUser?.user_id, recipe_id: recipeId, rating: String(rating), comment, is_favourite: isFav };
+    if (idx >= 0) state.recipeRatings[idx] = newRating;
+    else state.recipeRatings.push(newRating);
+    // Update avg_rating in recipes
+    const ratingInfo = getAvgRating(recipeId);
+    if (ratingInfo) {
+      await fetch(APPS_SCRIPT_URL, {
+        method: 'POST', mode: 'no-cors',
+        headers: {'Content-Type':'text/plain'},
+        body: JSON.stringify({ action: 'updateRecipe', recipeId, fields: { is_favorite: String(ratingInfo.avg) } })
+      });
+      const rec = state.recipes.find(r => r.recipe_id === recipeId);
+      if (rec) rec.is_favorite = String(ratingInfo.avg);
+    }
+    showRecipeDetail(recipeId);
+    renderRecipes();
+  } catch(e) { alert('Fehler: ' + e.message); }
+}
+
+let _pendingRating = {};
+function setRating(recipeId, stars) {
+  _pendingRating[recipeId] = stars;
+  // Update star display
+  const allStars = document.querySelectorAll(`span[onclick^="setRating('${recipeId}"]`);
+  allStars.forEach((s,i) => {
+    s.style.color = i < stars ? '#f5c87a' : 'var(--border)';
+  });
+}
+
+async function toggleFavourite(recipeId) {
+  const existing = getUserRating(recipeId);
+  const newFav = existing?.is_favourite === 'TRUE' ? 'FALSE' : 'TRUE';
+  try {
+    await fetch(APPS_SCRIPT_URL, {
+      method: 'POST', mode: 'no-cors',
+      headers: {'Content-Type':'text/plain'},
+      body: JSON.stringify({
+        action: 'saveRating',
+        user_id: currentUser?.user_id,
+        recipe_id: recipeId,
+        rating: existing?.rating || '',
+        comment: existing?.comment || '',
+        is_favourite: newFav
+      })
+    });
+    const idx = state.recipeRatings.findIndex(r => r.recipe_id === recipeId && r.user_id === currentUser?.user_id);
+    const newRating = { ...(existing||{}), user_id: currentUser?.user_id, recipe_id: recipeId, is_favourite: newFav };
+    if (idx >= 0) state.recipeRatings[idx] = newRating;
+    else state.recipeRatings.push(newRating);
+    renderRecipes();
+    // Refresh detail if open
+    const detail = document.getElementById('recipeDetailModal');
+    if (detail && detail.classList.contains('active')) showRecipeDetail(recipeId);
+  } catch(e) { alert('Fehler: ' + e.message); }
+}
 
   // Status badge helper
   const statusBadge = (r) => {
