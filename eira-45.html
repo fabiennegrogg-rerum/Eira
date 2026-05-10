@@ -1990,10 +1990,14 @@ function showNewFoodsTab(el) {
   const sampleKeys = state.foods.length ? Object.keys(state.foods[0]) : [];
   const hasCreatedBy = sampleKeys.includes('created_by');
 
+  const adminUserIds = (window._allUsers || [])
+    .filter(u => (u.role||'').toLowerCase() === 'admin')
+    .map(u => u.user_id);
+
   const newFoods = state.foods
     .filter(f => {
       const cb = (f.created_by || '').toString().trim();
-      return cb !== '' && cb !== 'undefined';
+      return cb !== '' && cb !== 'undefined' && !adminUserIds.includes(cb);
     })
     .sort((a,b) => (a.name||'').localeCompare(b.name||''));
 
