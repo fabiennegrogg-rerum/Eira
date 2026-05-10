@@ -812,7 +812,7 @@ async function fetchSheet(sheetId) {
   // Also try with just A:ZZ range (gets first sheet)
   for (const name of names) {
     try {
-      const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${name}!A:AE?key=${API_KEY}`;
+      const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${name}!A:AK?key=${API_KEY}`;
       const res = await fetch(url);
       if (!res.ok) continue;
       const data = await res.json();
