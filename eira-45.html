@@ -1102,6 +1102,7 @@ function renderToday() {
 
       // Focus A und B Werte für Log-Einträge
       const FOOD_KEY_MAP = { protein:'protein_g', fiber:'fiber_g', fat:'fat_g', carb:'carb_g' };
+      const MACRO_VAL_MAP = { protein:'protein', fiber:'fiber', fat:'fat', carb:'carb' };
       let focusBadges = '';
       if (log.item_type === 'food') {
         const foodForBadge = state.foods.find(f => f.food_id === log.food_ref || f.food_id === log.item_id);
@@ -1116,6 +1117,23 @@ function renderToday() {
             const opt = MACRO_OPTIONS.find(o=>o.key===focusKey);
             const emoji = opt ? opt.label.split(' ')[0] : '';
             focusBadges += `<span style="font-size:12px;font-weight:600;color:${color};margin-right:4px;">${val}${opt?.unit||'g'} ${emoji}</span>`;
+          });
+        }
+      } else if (log.item_type === 'recipe') {
+        const recipe = state.recipes.find(r => r.recipe_id === (log.recipe_ref||log.item_id));
+        if (recipe) {
+          const servings = parseFloat(log.servings)||1;
+          const recipeMacros = calcRecipeMacros(recipe.recipe_id, recipe.serving_yield);
+          [layout.focusA, layout.focusB].forEach(focusKey => {
+            const macroKey = MACRO_VAL_MAP[focusKey];
+            if (!macroKey) return;
+            const valPerPortion = recipeMacros[macroKey] || 0;
+            const totalVal = Math.round(valPerPortion * servings * 10) / 10;
+            // Use per-portion value for color (reference per 100g doesn't apply, use portion as proxy)
+            const color = getFocusColor(focusKey, valPerPortion);
+            const opt = MACRO_OPTIONS.find(o=>o.key===focusKey);
+            const emoji = opt ? opt.label.split(' ')[0] : '';
+            focusBadges += `<span style="font-size:12px;font-weight:600;color:${color};margin-right:4px;">${totalVal}${opt?.unit||'g'} ${emoji}</span>`;
           });
         }
       }
