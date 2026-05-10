@@ -1993,6 +1993,10 @@ function showNewFoodsTab(el) {
   const adminUserIds = (window._allUsers || [])
     .filter(u => (u.role||'').toLowerCase() === 'admin')
     .map(u => u.user_id);
+  // Fallback: auch aktuellen User ausschliessen wenn er Admin ist
+  if (isAdmin() && currentUser && !adminUserIds.includes(currentUser.user_id)) {
+    adminUserIds.push(currentUser.user_id);
+  }
 
   const newFoods = state.foods
     .filter(f => {
