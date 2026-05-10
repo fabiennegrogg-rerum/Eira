@@ -824,17 +824,16 @@ const todayISO = new Date().toISOString().split('T')[0];
 // ============================================================
 // API
 // ============================================================
-async function fetchSheet(sheetId) {
-  // Try many possible tab names including user-specific ones
-  const names = [
-    'foods','logs','recipes','recipe_items','targets','macros_today',
-    'day_reflection','gi_table','users','Sheet1','Tabelle1','Blatt1',
-    'logs_silas','logs_fabian','logs_bruder',
-    'targets_silas','targets_fabian','targets_bruder',
-    'day_reflection_silas','day_reflection_fabian',
-    'macros_today_silas','macros_today_fabian'
+async function fetchSheet(sheetId, tabName=null) {
+  // If tabName given, try directly first
+  const directNames = tabName ? [tabName] : [];
+  const fallbackNames = [
+    'foods','logs','recipes','recipe_items','targets','recipe_ratings',
+    'macros_today','day_reflection','gi_table','users','Sheet1','Tabelle1','Blatt1',
+    'logs_silas','logs_fabian','logs_bruder','logs_testuser',
+    'targets_silas','targets_fabian','targets_bruder','targets_testuser',
   ];
-  // Also try with just A:ZZ range (gets first sheet)
+  const names = tabName ? directNames : fallbackNames;
   for (const name of names) {
     try {
       const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${name}!A:AK?key=${API_KEY}`;
@@ -842,10 +841,10 @@ async function fetchSheet(sheetId) {
       if (!res.ok) continue;
       const data = await res.json();
       if (data.values && data.values.length >= 1) return data.values;
-      if (data.values && data.values.length === 0) return []; // empty sheet is ok
+      if (data.values && data.values.length === 0) return [];
     } catch(e) { continue; }
   }
-  throw new Error('Sheet nicht erreichbar');
+  throw new Error('Sheet nicht erreichbar: ' + sheetId);
 }
 
 async function appendRow(sheetId, values) {
@@ -891,12 +890,12 @@ async function loadAll() {
   try {
     // allSettled: ein fehlgeschlagenes Sheet bricht nicht alles ab
     const [foodRes, recipeRes, recipeItemRes, logRes, targetRes, ratingsRes] = await Promise.allSettled([
-      fetchSheet(SHEETS.foods),
-      fetchSheet(SHEETS.recipes),
-      fetchSheet(SHEETS.recipe_items),
-      fetchSheet(SHEETS.logs),
-      fetchSheet(SHEETS.targets),
-      fetchSheet(SHEETS_BASE.recipe_ratings)
+      fetchSheet(SHEETS.foods, 'foods'),
+      fetchSheet(SHEETS.recipes, 'recipes'),
+      fetchSheet(SHEETS.recipe_items, 'recipe_items'),
+      fetchSheet(SHEETS.logs, 'logs'),
+      fetchSheet(SHEETS.targets, 'targets'),
+      fetchSheet(SHEETS_BASE.recipe_ratings, 'recipe_ratings')
     ]);
 
     state.foods         = foodRes.status==='fulfilled'      ? rowsToObjects(foodRes.value)       : [];
@@ -2633,7 +2632,7 @@ async function initApp() {
   if (savedUserId && savedUserName) {
     // Load users to get sheet IDs
     try {
-      const rows = await fetchSheet(SHEETS_BASE.users);
+      const rows = await fetchSheet(SHEETS_BASE.users, 'users');
       const users = rowsToObjects(rows);
       const user = users.find(u => u.user_id === savedUserId);
       if (user) {
@@ -2655,7 +2654,7 @@ async function showUserSelect() {
   document.querySelectorAll('.page').forEach(p => p.style.display = 'none');
 
   try {
-    const rows = await fetchSheet(SHEETS_BASE.users);
+    const rows = await fetchSheet(SHEETS_BASE.users, 'users');
     const users = rowsToObjects(rows);
     const list = document.getElementById('userList');
     if (!users.length) {
