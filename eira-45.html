@@ -721,7 +721,7 @@
 
 <!-- Modal: Add Recipe -->
 <div class="modal-overlay" id="addRecipeModal">
-  <div class="modal" style="position:relative;">
+  <div class="modal" style="position:relative;max-height:92vh;overflow-y:auto;">
     <div class="modal-handle"></div>
     <button class="modal-close" onclick="closeModal('addRecipeModal')">✕</button>
     <div class="modal-title">Neues Rezept</div>
@@ -735,6 +735,26 @@
         <input class="form-input" id="newRecipeServings" type="number" placeholder="4" min="1">
       </div>
       <div class="form-group">
+        <label class="form-label">Zeit (min)</label>
+        <input class="form-input" id="newRecipeTime" type="number" placeholder="30" min="0">
+      </div>
+    </div>
+    <div class="row">
+      <div class="form-group">
+        <label class="form-label">Mahlzeit-Typ</label>
+        <select class="form-select" id="newRecipeMealType">
+          <option value="">– wählen –</option>
+          <option>Frühstück</option>
+          <option>Brunch</option>
+          <option>Snack salzig</option>
+          <option>Snack süss</option>
+          <option>Hauptmahlzeit</option>
+          <option>Dessert</option>
+          <option>Sauce</option>
+          <option>Getränk</option>
+        </select>
+      </div>
+      <div class="form-group">
         <label class="form-label">Saison</label>
         <select class="form-select" id="newRecipeSeason">
           <option value="">Alle</option>
@@ -743,8 +763,16 @@
       </div>
     </div>
     <div class="form-group">
-      <label class="form-label">Notizen</label>
-      <input class="form-input" id="newRecipeNotes" placeholder="Zubereitungshinweise...">
+      <label class="form-label">Tags (kommagetrennt)</label>
+      <input class="form-input" id="newRecipeTags" placeholder="z.B. Vegi, High Protein, Glutenfrei">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Zubereitung (jeder Schritt = neue Zeile)</label>
+      <textarea class="form-input" id="newRecipeInstructions" rows="5" style="resize:vertical;" placeholder="Schritt 1&#10;Schritt 2&#10;Schritt 3"></textarea>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Notizen / Tipps</label>
+      <input class="form-input" id="newRecipeNotes" placeholder="Optionale Tipps...">
     </div>
     <div style="font-weight:600;margin-bottom:10px;font-size:14px;">Zutaten</div>
     <div id="recipeIngredients"></div>
@@ -1905,20 +1933,24 @@ async function saveNewRecipe() {
   const servings = document.getElementById('newRecipeServings').value || 1;
   const season = document.getElementById('newRecipeSeason').value;
   const notes = document.getElementById('newRecipeNotes').value;
+  const mealType = document.getElementById('newRecipeMealType').value;
+  const tags = document.getElementById('newRecipeTags').value;
+  const instructions = document.getElementById('newRecipeInstructions').value;
+  const mealTime = document.getElementById('newRecipeTime').value;
   const isAdminUser = isAdmin();
-  const recipeRow = [recipeId, name, servings, notes, season, 'FALSE', currentUser ? currentUser.user_id : '', isAdminUser ? 'public' : 'private'];
+  const recipeRow = [recipeId, name, mealType, tags, servings, mealTime, instructions, notes, season, 'FALSE', currentUser ? currentUser.user_id : '', isAdminUser ? 'public' : 'private'];
   try {
     await appendRow(SHEETS.recipes, recipeRow);
     for (const ing of state.newRecipeIngredients) {
       await appendRow(SHEETS.recipe_items, [recipeId, ing.food_id, ing.grams]);
     }
-    const newRecipe = { recipe_id:recipeId, name, serving_yield:servings, notes, season_tag:season, is_favorite:'FALSE', created_by: currentUser ? currentUser.user_id : '', status: isAdminUser ? 'public' : 'private' };
+    const newRecipe = { recipe_id:recipeId, name, meal_type:mealType, tags, serving_yield:servings, meal_time_min:mealTime, instructions, notes, season_tag:season, is_favorite:'FALSE', created_by: currentUser ? currentUser.user_id : '', status: isAdminUser ? 'public' : 'private' };
     state.recipes.push(newRecipe);
     state.newRecipeIngredients.forEach(ing => state.recipeItems.push({ recipe_id:recipeId, food_id:ing.food_id, grams:ing.grams }));
     state.newRecipeIngredients = [];
     closeModal('addRecipeModal');
     renderRecipes();
-    ['newRecipeName','newRecipeServings','newRecipeNotes'].forEach(id => document.getElementById(id).value = '');
+    ['newRecipeName','newRecipeServings','newRecipeNotes','newRecipeTags','newRecipeInstructions','newRecipeTime'].forEach(id => { const el = document.getElementById(id); if(el) el.value = ''; });
   } catch(e) {
     showError('addRecipeError', 'Fehler: ' + e.message);
   }
@@ -2162,12 +2194,20 @@ function showEditRecipeModal(recipeId) {
   const recipe = state.recipes.find(r => r.recipe_id === recipeId);
   if (!recipe) return;
 
-  // Fill basic fields
   document.getElementById('editRecipeId').value = recipeId;
   document.getElementById('editRecipeName').value = recipe.name || '';
   document.getElementById('editRecipeServings').value = recipe.serving_yield || 1;
+  document.getElementById('editRecipeTime').value = recipe.meal_time_min || '';
+  document.getElementById('editRecipeTags').value = recipe.tags || '';
+  document.getElementById('editRecipeInstructions').value = recipe.instructions || '';
   document.getElementById('editRecipeNotes').value = recipe.notes || '';
-  document.getElementById('editRecipeFav').value = recipe.is_favorite === 'TRUE' ? 'TRUE' : 'FALSE';
+
+  // Meal type
+  const mealSelect = document.getElementById('editRecipeMealType');
+  for (let i = 0; i < mealSelect.options.length; i++) {
+    if (mealSelect.options[i].value === recipe.meal_type) { mealSelect.selectedIndex = i; break; }
+  }
+  // Season
   const seasonSelect = document.getElementById('editRecipeSeason');
   for (let i = 0; i < seasonSelect.options.length; i++) {
     if (seasonSelect.options[i].value === recipe.season_tag) { seasonSelect.selectedIndex = i; break; }
@@ -2221,9 +2261,12 @@ async function saveEditRecipe() {
   const fields = {
     name: document.getElementById('editRecipeName').value,
     serving_yield: document.getElementById('editRecipeServings').value,
+    meal_time_min: document.getElementById('editRecipeTime').value,
+    meal_type: document.getElementById('editRecipeMealType').value,
+    tags: document.getElementById('editRecipeTags').value,
+    instructions: document.getElementById('editRecipeInstructions').value,
     notes: document.getElementById('editRecipeNotes').value,
     season_tag: document.getElementById('editRecipeSeason').value,
-    is_favorite: document.getElementById('editRecipeFav').value,
   };
   try {
     await fetch(APPS_SCRIPT_URL, {
@@ -3134,7 +3177,7 @@ loadLayout();
 
 <!-- Modal: Edit Recipe -->
 <div class="modal-overlay" id="editRecipeModal">
-  <div class="modal" style="position:relative;">
+  <div class="modal" style="position:relative;max-height:92vh;overflow-y:auto;">
     <div class="modal-handle"></div>
     <button class="modal-close" onclick="closeModal('editRecipeModal')">✕</button>
     <div class="modal-title">Rezept bearbeiten</div>
@@ -3148,6 +3191,26 @@ loadLayout();
         <input class="form-input" id="editRecipeServings" type="number" min="1">
       </div>
       <div class="form-group">
+        <label class="form-label">Zeit (min)</label>
+        <input class="form-input" id="editRecipeTime" type="number" min="0" placeholder="z.B. 30">
+      </div>
+    </div>
+    <div class="row">
+      <div class="form-group">
+        <label class="form-label">Mahlzeit-Typ</label>
+        <select class="form-select" id="editRecipeMealType">
+          <option value="">– wählen –</option>
+          <option>Frühstück</option>
+          <option>Brunch</option>
+          <option>Snack salzig</option>
+          <option>Snack süss</option>
+          <option>Hauptmahlzeit</option>
+          <option>Dessert</option>
+          <option>Sauce</option>
+          <option>Getränk</option>
+        </select>
+      </div>
+      <div class="form-group">
         <label class="form-label">Saison</label>
         <select class="form-select" id="editRecipeSeason">
           <option value="">Alle</option>
@@ -3156,15 +3219,16 @@ loadLayout();
       </div>
     </div>
     <div class="form-group">
-      <label class="form-label">Notizen</label>
-      <input class="form-input" id="editRecipeNotes">
+      <label class="form-label">Tags (kommagetrennt)</label>
+      <input class="form-input" id="editRecipeTags" placeholder="z.B. Vegi, High Protein, Glutenfrei">
     </div>
     <div class="form-group">
-      <label class="form-label">Favorit</label>
-      <select class="form-select" id="editRecipeFav">
-        <option value="FALSE">Nein</option>
-        <option value="TRUE">Ja ★</option>
-      </select>
+      <label class="form-label">Zubereitung (jeder Schritt = neue Zeile)</label>
+      <textarea class="form-input" id="editRecipeInstructions" rows="6" style="resize:vertical;" placeholder="Schritt 1&#10;Schritt 2&#10;Schritt 3"></textarea>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Notizen / Tipps</label>
+      <input class="form-input" id="editRecipeNotes" placeholder="Optionale Tipps">
     </div>
     <div style="font-weight:600;font-size:14px;margin-bottom:10px;margin-top:4px;">Zutaten</div>
     <div id="editRecipeIngredients"></div>
