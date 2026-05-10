@@ -1543,7 +1543,7 @@ async function saveNewFood() {
     '',                                                      // AE: tryptophan_mg
     '',                                                      // AF: lysine_mg
     unit,                                                    // AG: unit_type
-    '',                                                      // AH: density_g_per_ml
+    document.getElementById('editFoodDensity')?.value || 1, // AH: density_g_per_ml (1 = Standard)
     'FALSE',                                                 // AI: fav
     currentUser ? currentUser.user_id : ''                   // AJ: created_by
   ];
