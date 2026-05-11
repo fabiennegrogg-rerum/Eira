@@ -1957,6 +1957,12 @@ async function saveNewRecipe() {
   const name = document.getElementById('newRecipeName').value.trim();
   if (!name) { showError('addRecipeError', 'Bitte einen Namen eingeben'); return; }
   if (!state.newRecipeIngredients.length) { showError('addRecipeError', 'Bitte mindestens eine Zutat hinzufügen'); return; }
+
+  // Doppelklick-Schutz
+  const saveBtn = document.querySelector('#addRecipeModal .btn-primary');
+  if (saveBtn && saveBtn.disabled) return;
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Speichern...'; }
+
   const recipeId = generateRecipeId();
   const servings = document.getElementById('newRecipeServings').value || 1;
   const season = document.getElementById('newRecipeSeason').value;
@@ -1967,20 +1973,23 @@ async function saveNewRecipe() {
   const mealTime = document.getElementById('newRecipeTime').value;
   const isAdminUser = isAdmin();
   const recipeRow = [recipeId, name, mealType, tags, servings, mealTime, instructions, notes, season, 'FALSE', currentUser ? currentUser.user_id : '', isAdminUser ? 'public' : 'private'];
+  // Zutaten-Snapshot sichern (verhindert doppeltes Speichern bei Race Condition)
+  const ingredientsSnapshot = [...state.newRecipeIngredients];
   try {
     await appendRow(SHEETS.recipes, recipeRow);
-    for (const ing of state.newRecipeIngredients) {
+    for (const ing of ingredientsSnapshot) {
       await appendRow(SHEETS.recipe_items, [recipeId, ing.food_id, ing.grams]);
     }
     const newRecipe = { recipe_id:recipeId, name, meal_type:mealType, tags, serving_yield:servings, meal_time_min:mealTime, instructions, notes, season_tag:season, is_favorite:'FALSE', created_by: currentUser ? currentUser.user_id : '', status: isAdminUser ? 'public' : 'private' };
     state.recipes.push(newRecipe);
-    state.newRecipeIngredients.forEach(ing => state.recipeItems.push({ recipe_id:recipeId, food_id:ing.food_id, grams:ing.grams }));
+    ingredientsSnapshot.forEach(ing => state.recipeItems.push({ recipe_id:recipeId, food_id:ing.food_id, grams:ing.grams }));
     state.newRecipeIngredients = [];
     closeModal('addRecipeModal');
     renderRecipes();
     ['newRecipeName','newRecipeServings','newRecipeNotes','newRecipeTags','newRecipeInstructions','newRecipeTime'].forEach(id => { const el = document.getElementById(id); if(el) el.value = ''; });
   } catch(e) {
     showError('addRecipeError', 'Fehler: ' + e.message);
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Rezept speichern ✓'; }
   }
 }
 
