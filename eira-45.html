@@ -1086,8 +1086,8 @@ function renderToday() {
     <div style="font-size:10px;color:var(--text2);">Ziel ≤${glTarget}</div>
   </div>`;
 
-  const meals = ['Frühstück','Znüni','Mittagessen','Zvieri','Abendessen'];
-  const mealEmojis = {'Frühstück':'🌅','Znüni':'🍎','Mittagessen':'☀️','Zvieri':'🍇','Abendessen':'🌙'};
+  const meals = ['Frühstück','Znüni','Mittagessen','Zvieri','Abendessen','Bettmümpfeli'];
+  const mealEmojis = {'Frühstück':'🌅','Znüni':'🍎','Mittagessen':'☀️','Zvieri':'🍇','Abendessen':'🌙','Bettmümpfeli':'🌛'};
 
   let mealHTML = '';
   meals.forEach(meal => {
@@ -1205,7 +1205,7 @@ function renderToday() {
 // LOG PAGE
 // ============================================================
 function renderLogPage() {
-  const meals = ['Frühstück','Znüni','Mittagessen','Zvieri','Abendessen'];
+  const meals = ['Frühstück','Znüni','Mittagessen','Zvieri','Abendessen','Bettmümpfeli'];
   let html = '';
   meals.forEach(meal => {
     const count = state.todayLogs.filter(l => l.meal === meal).length;
@@ -2762,8 +2762,8 @@ function loadHistoryDay(dateStr) {
     </div>`;
 
     // Meals
-    const meals = ['Frühstück','Znüni','Mittagessen','Zvieri','Abendessen'];
-    const mealEmojis = {'Frühstück':'🌅','Znüni':'🍎','Mittagessen':'☀️','Zvieri':'🍇','Abendessen':'🌙'};
+    const meals = ['Frühstück','Znüni','Mittagessen','Zvieri','Abendessen','Bettmümpfeli'];
+    const mealEmojis = {'Frühstück':'🌅','Znüni':'🍎','Mittagessen':'☀️','Zvieri':'🍇','Abendessen':'🌙','Bettmümpfeli':'🌛'};
     let mealsHTML = '';
     meals.forEach(meal => {
       const entries = dayLogs.filter(l => l.meal === meal);
