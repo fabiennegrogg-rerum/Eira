@@ -967,7 +967,7 @@ function getTodayTarget() {
 }
 
 function calcTodayMacros() {
-  let macros = { protein:0, carb:0, fat:0, fiber:0, zucker:0, iron:0, vitc:0, kcal:0, calcium:0, zinc:0, omega3:0, vitA:0, vitD:0, vitK:0, vitB12:0, folsaeure:0, selen:0, jod:0, magnesium:0, kalium:0, natrium:0, tryptophan:0, lysine:0, gl:0, giWeightedSum:0, giCarbSum:0 };
+  let macros = { protein:0, carb:0, fat:0, fiber:0, zucker:0, iron:0, ironBio:0, vitc:0, kcal:0, calcium:0, zinc:0, omega3:0, vitA:0, vitD:0, vitK:0, vitB12:0, folsaeure:0, selen:0, jod:0, magnesium:0, kalium:0, natrium:0, tryptophan:0, lysine:0, gl:0, giWeightedSum:0, giCarbSum:0 };
   state.todayLogs.forEach(log => {
     if (log.item_type === 'food') {
       const food = state.foods.find(f => f.food_id === log.food_ref || f.food_id === log.item_id);
@@ -980,6 +980,11 @@ function calcTodayMacros() {
       macros.fiber += (parseFloat(food.fiber_g)||0) * factor;
       macros.zucker += (parseFloat(food.zucker_g)||0) * factor;
       macros.iron += (parseFloat(food.iron_mg)||0) * factor;
+      // Bioverfügbarkeit: Häm × 0.25, Nicht-Häm × 0.10, unbekannt × 0.15
+      const rawIron = (parseFloat(food.iron_mg)||0) * factor;
+      if (food.iron_type === 'haem') macros.ironBio += rawIron * 0.25;
+      else if (food.iron_type === 'non-haem') macros.ironBio += rawIron * 0.10;
+      else macros.ironBio += rawIron * 0.15;
       macros.vitc += (parseFloat(food.vitamin_c_mg)||0) * factor;
       macros.kcal += ((parseFloat(food.protein_g)||0) * 4 + (parseFloat(food.carb_g)||0) * 4 + (parseFloat(food.fat_g)||0) * 9) * factor;
       macros.calcium += (parseFloat(food.calcium_mg)||0) * factor;
@@ -2166,6 +2171,8 @@ function showEditFoodModal(foodId) {
   document.getElementById('editFoodDensity').value = food.density_g_per_ml || '';
   document.getElementById('editFoodGI').value = food.gi || '';
   document.getElementById('editFoodGL').value = food.gl || '';
+  const ironTypeSelect = document.getElementById('editFoodIronType');
+  ironTypeSelect.value = food.iron_type || '';
   const catSelect = document.getElementById('editFoodCategory');
   for (let i = 0; i < catSelect.options.length; i++) {
     if (catSelect.options[i].value === food.category) { catSelect.selectedIndex = i; break; }
@@ -2203,6 +2210,7 @@ async function saveEditFood() {
     density_g_per_ml: document.getElementById('editFoodDensity').value,
     gi: document.getElementById('editFoodGI').value,
     gl: document.getElementById('editFoodGL').value,
+    iron_type: document.getElementById('editFoodIronType').value,
     portion_g: document.getElementById('editFoodPortion').value,
   };
   try {
@@ -3280,10 +3288,14 @@ function renderMacroTile(key, macros, target, size='small') {
       <div class="macro-bar"><div class="macro-bar-fill" style="width:${pct}%;background:${td.color}"></div></div>
     </div>`;
   } else {
-    // Small micro tile
+    // Small micro tile — Eisen zeigt zusätzlich bioverfügbares Eisen
+    const extraInfo = key === 'iron' && macros.ironBio > 0
+      ? `<div style="font-size:10px;color:var(--text2);margin-top:1px;">verfügb. ~${Math.round(macros.ironBio*10)/10}mg</div>`
+      : '';
     return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px;">
       <div class="macro-label">${opt.label}</div>
       <div style="font-size:18px;font-weight:700;">${displayVal}<span style="font-size:11px;color:var(--text2)">${opt.unit}</span></div>
+      ${extraInfo}
       <div class="macro-target">/ ${td.t}${opt.unit}</div>
       <div class="macro-bar"><div class="macro-bar-fill" style="width:${pct}%;background:${td.color}"></div></div>
     </div>`;
@@ -3360,6 +3372,14 @@ loadLayout();
     <div class="row">
       <div class="form-group"><label class="form-label">GI (glykäm. Index)</label><input class="form-input" id="editFoodGI" type="number" step="1" placeholder="0-100"></div>
       <div class="form-group"><label class="form-label">GL (glykäm. Last)</label><input class="form-input" id="editFoodGL" type="number" step="0.1" placeholder="pro 100g"></div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Eisen-Typ</label>
+      <select class="form-select" id="editFoodIronType">
+        <option value="">– unbekannt –</option>
+        <option value="haem">Häm-Eisen (Fleisch, Fisch, Geflügel)</option>
+        <option value="non-haem">Nicht-Häm-Eisen (Pflanzen, Eier, Milch)</option>
+      </select>
     </div>
     <div class="row">
       <div class="form-group"><label class="form-label">Std. Portion (g)</label><input class="form-input" id="editFoodPortion" type="number"></div>
