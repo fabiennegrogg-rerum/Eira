@@ -2948,7 +2948,17 @@ function batchAvailable(batch) {
   const planned = state.mealPlan
     .filter(mp => mp.batch_id === batch.batch_id && (mp.status === 'planned' || mp.status === 'confirmed'))
     .reduce((s, mp) => s + (parseFloat(mp.portions) || 0), 0);
-  return Math.max(0, total - gifted - planned);
+  // Logs, die bereits über einen bestätigten meal_plan-Eintrag gezählt wurden, hier ausschliessen (sonst Doppelzählung)
+  const confirmedLogIds = new Set(
+    state.mealPlan
+      .filter(mp => mp.batch_id === batch.batch_id && mp.confirmed_log_id)
+      .map(mp => mp.confirmed_log_id)
+  );
+  // Direkte Vorrats-Quick-Logs (ohne meal_plan-Bezug) zusätzlich abziehen
+  const quickLogged = state.logs
+    .filter(l => l.batch_id === batch.batch_id && !confirmedLogIds.has(l.log_id))
+    .reduce((s, l) => s + (parseFloat(l.servings) || 1), 0);
+  return Math.max(0, total - gifted - planned - quickLogged);
 }
 
 function householdBatches() {
