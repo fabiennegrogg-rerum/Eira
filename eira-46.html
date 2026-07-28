@@ -698,13 +698,12 @@
           <div style="font-size:12px;color:var(--text2);margin-top:4px;" id="selectedFoodMacros"></div>
         </div>
         <div class="form-group">
-          <label class="form-label" id="logFoodGramsLabel">Menge (g)</label>
+          <label class="form-label">Menge (g)</label>
           <input class="form-input" type="number" id="logFoodGrams" placeholder="100" value="100" oninput="updateFoodPreview()">
-          <div id="stkGramsDisplay" style="font-size:12px;color:var(--text2);margin-top:4px;display:none;"></div>
           <div id="portionHint" style="font-size:11px;color:var(--text2);margin-top:4px;"></div>
         </div>
         <div id="foodPreview" style="font-size:13px;color:var(--text2);margin-bottom:14px;"></div>
-        <button class="btn btn-primary" onclick="saveLogEntry(this)">Hinzufügen ✓</button>
+        <button class="btn btn-primary" onclick="saveLogEntry()">Hinzufügen ✓</button>
       </div>
     </div>
     <div id="logTabRecipe" style="display:none;">
@@ -723,7 +722,7 @@
           <label class="form-label">Anzahl Portionen</label>
           <input class="form-input" type="number" id="logRecipeServings" placeholder="1" value="1" step="0.5" min="0.5">
         </div>
-        <button class="btn btn-primary" onclick="saveRecipeLogEntry(this)">Hinzufügen ✓</button>
+        <button class="btn btn-primary" onclick="saveRecipeLogEntry()">Hinzufügen ✓</button>
       </div>
     </div>
   </div>
@@ -778,7 +777,7 @@
       <div class="form-group"><label class="form-label">Std. Portion (g)</label><input class="form-input" id="nf_portion" type="number" placeholder="100"></div>
     </div>
     <div id="addFoodError" class="error-msg" style="display:none;"></div>
-    <button class="btn btn-primary" onclick="saveNewFood(this)" style="margin-top:8px;">Speichern ✓</button>
+    <button class="btn btn-primary" onclick="saveNewFood()" style="margin-top:8px;">Speichern ✓</button>
   </div>
 </div>
 
@@ -942,29 +941,6 @@ async function fetchSheet(sheetId, tabName=null) {
   throw new Error('Sheet nicht erreichbar: ' + sheetId);
 }
 
-// ============================================================
-// DOPPEL-SPEICHERUNG VERHINDERN
-// Sperrt einen Button während ein async Speichervorgang läuft,
-// damit ein zweiter Tap (z.B. wegen kurzer Ladeverzögerung) ignoriert wird.
-// ============================================================
-function lockSaveBtn(btn, busyText) {
-  if (!btn) return false;
-  if (btn.disabled) return false; // läuft bereits -> zweiten Klick ignorieren
-  btn.dataset.origText = btn.textContent;
-  btn.disabled = true;
-  btn.style.opacity = '0.6';
-  btn.style.cursor = 'not-allowed';
-  if (busyText) btn.textContent = busyText;
-  return true;
-}
-function unlockSaveBtn(btn) {
-  if (!btn) return;
-  btn.disabled = false;
-  btn.style.opacity = '';
-  btn.style.cursor = '';
-  if (btn.dataset.origText) btn.textContent = btn.dataset.origText;
-}
-
 async function appendRow(sheetId, values) {
   // Map sheetId to action name
   const actionMap = {
@@ -1014,6 +990,8 @@ function rowsToObjects(rows) {
 // ============================================================
 // LOAD DATA
 // ============================================================
+let dayTypeAutoSet = false;
+
 async function loadAll() {
   try {
     // allSettled: ein fehlgeschlagenes Sheet bricht nicht alles ab
@@ -1033,6 +1011,12 @@ async function loadAll() {
     state.recipeItems   = recipeItemRes.status==='fulfilled'? rowsToObjects(recipeItemRes.value) : [];
     state.logs          = logRes.status==='fulfilled'       ? rowsToObjects(logRes.value)        : [];
     state.targets       = targetRes.status==='fulfilled'    ? rowsToObjects(targetRes.value)     : [];
+
+    if (!dayTypeAutoSet) {
+      const favTarget = state.targets.find(t => t.is_default === 'TRUE');
+      if (favTarget) state.dayType = favTarget.date;
+      dayTypeAutoSet = true;
+    }
     state.recipeRatings = ratingsRes.status==='fulfilled'   ? rowsToObjects(ratingsRes.value)    : [];
     state.cookingBatches= batchRes.status==='fulfilled'     ? rowsToObjects(batchRes.value)      : [];
     state.mealPlan      = mealPlanRes.status==='fulfilled'  ? rowsToObjects(mealPlanRes.value)   : [];
@@ -1602,7 +1586,7 @@ function showRecipeDetail(recipeId) {
       <textarea id="ratingComment_${recipeId}" placeholder="Kommentar / Tipp (optional)" 
         style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--text);font-size:13px;resize:vertical;min-height:60px;">${userRating?.comment||''}</textarea>
       <div style="display:flex;gap:8px;margin-top:8px;">
-        <button onclick="saveRating('${recipeId}', this)" style="background:var(--accent);color:#0f0f0e;border:none;border-radius:8px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer;">Bewertung speichern</button>
+        <button onclick="saveRating('${recipeId}')" style="background:var(--accent);color:#0f0f0e;border:none;border-radius:8px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer;">Bewertung speichern</button>
         <button onclick="toggleFavourite('${recipeId}')" style="background:${userRating?.is_favourite==='TRUE'?'rgba(245,200,122,0.2)':'var(--surface)'};border:1px solid ${userRating?.is_favourite==='TRUE'?'var(--accent2)':'var(--border)'};border-radius:8px;padding:8px 14px;font-size:14px;cursor:pointer;">${userRating?.is_favourite==='TRUE'?'❤️ Favorit':'🤍 Favorit'}</button>
       </div>
     </div>
@@ -1629,8 +1613,7 @@ function showRecipeDetail(recipeId) {
   openModal('recipeDetailModal');
 }
 
-async function saveRating(recipeId, btn) {
-  if (!lockSaveBtn(btn, 'Speichert...')) return;
+async function saveRating(recipeId) {
   const stars = document.querySelectorAll(`[onclick^="setRating('${recipeId}"]`);
   let rating = 0;
   stars.forEach((s,i) => { if (s.style.color === 'rgb(245, 200, 122)') rating = i+1; });
@@ -1669,7 +1652,6 @@ async function saveRating(recipeId, btn) {
     showRecipeDetail(recipeId);
     renderRecipes();
   } catch(e) { alert('Fehler: ' + e.message); }
-  finally { unlockSaveBtn(btn); }
 }
 
 let _pendingRating = {};
@@ -1780,17 +1762,15 @@ function switchLogTab(tab, btn) {
 function searchLogFood(q) {
   if (!q) { document.getElementById('logFoodResults').innerHTML = ''; return; }
   const results = state.foods.filter(f => f.name?.toLowerCase().includes(q.toLowerCase())).slice(0, 8);
-  document.getElementById('logFoodResults').innerHTML = results.map(f => {
-    const isStk = (f.unit_type === 'Stück' || f.unit_type === 'Stk');
-    const portionText = isStk ? `1 Stück ≈ ${f.portion_g||f.portion_def||f.default_serv||100}g` : `${f.portion_g||f.portion_def||f.default_serv||100}g Standard`;
-    return `<div class="search-result-item" onclick="selectLogFood('${f.food_id}')">
+  document.getElementById('logFoodResults').innerHTML = results.map(f =>
+    `<div class="search-result-item" onclick="selectLogFood('${f.food_id}')">
       <div>
         <div class="result-name">${f.name}</div>
-        <div class="result-detail">${f.category||''} · ${portionText}</div>
+        <div class="result-detail">${f.category||''} · ${f.portion_def||f.default_serv||100}g Standard</div>
       </div>
       <div class="result-fiber">${f.fiber_g||0}g 🌿</div>
-    </div>`;
-  }).join('');
+    </div>`
+  ).join('');
 }
 
 function selectLogFood(foodId) {
@@ -1802,64 +1782,30 @@ function selectLogFood(foodId) {
   document.getElementById('selectedFoodName').textContent = food.name;
   document.getElementById('selectedFoodMacros').textContent =
     `P: ${food.protein_g||0}g · KH: ${food.carb_g||0}g · F: ${food.fat_g||0}g · Balaststoffe: ${food.fiber_g||0}g (pro 100g)`;
-  const defaultPortion = food.portion_g || food.portion_def || food.portion_default || food.default_serv || 100;
-  const isStk = (food.unit_type === 'Stück' || food.unit_type === 'Stk');
-  const label = document.getElementById('logFoodGramsLabel');
-  const input = document.getElementById('logFoodGrams');
-  const stkDisplay = document.getElementById('stkGramsDisplay');
+  const defaultPortion = food.portion_def || food.portion_default || food.default_serv || 100;
+  document.getElementById('logFoodGrams').value = defaultPortion;
+  // Show portion hint
+  const min = food.portion_min || '';
+  const max = food.portion_max || '';
   const hint = document.getElementById('portionHint');
-  if (isStk) {
-    label.textContent = 'Anzahl Stück';
-    input.value = 1;
-    input.step = '0.5';
-    input.placeholder = '1';
-    stkDisplay.style.display = 'block';
-    if (hint) hint.textContent = `1 Stück ≈ ${defaultPortion}g`;
-  } else {
-    label.textContent = 'Menge (g)';
-    input.value = defaultPortion;
-    input.step = '1';
-    input.placeholder = '100';
-    stkDisplay.style.display = 'none';
-    const min = food.portion_min || '';
-    const max = food.portion_max || '';
-    if (hint) {
-      let hintText = `Standard: ${defaultPortion}g`;
-      if (min && max) hintText += ` · Min: ${min}g · Max: ${max}g`;
-      hint.textContent = hintText;
-    }
+  if (hint) {
+    let hintText = `Standard: ${defaultPortion}g`;
+    if (min && max) hintText += ` · Min: ${min}g · Max: ${max}g`;
+    hint.textContent = hintText;
   }
   document.getElementById('logFoodSelected').style.display = 'block';
   updateFoodPreview();
 }
 
-function getLogFoodGrams() {
-  // Returns the effective grams for the currently selected food, accounting for Stück-based items.
-  const f = state.selectedFood;
-  if (!f) return 0;
-  const raw = parseFloat(document.getElementById('logFoodGrams').value) || 0;
-  const isStk = (f.unit_type === 'Stück' || f.unit_type === 'Stk');
-  if (isStk) {
-    const gramsPerStk = parseFloat(f.portion_g) || 100;
-    return raw * gramsPerStk;
-  }
-  return raw;
-}
-
 function updateFoodPreview() {
   if (!state.selectedFood) return;
+  const g = parseFloat(document.getElementById('logFoodGrams').value) || 100;
   const f = state.selectedFood;
-  const g = getLogFoodGrams() || 100;
-  const isStk = (f.unit_type === 'Stück' || f.unit_type === 'Stk');
-  if (isStk) {
-    const count = parseFloat(document.getElementById('logFoodGrams').value) || 0;
-    document.getElementById('stkGramsDisplay').textContent = `≈ ${Math.round(g)}g`;
-  }
   const factor = g / 100;
   const fiber = ((parseFloat(f.fiber_g)||0) * factor).toFixed(1);
   const protein = ((parseFloat(f.protein_g)||0) * factor).toFixed(1);
   document.getElementById('foodPreview').innerHTML =
-    `→ <span style="color:var(--accent)">${fiber}g Ballaststoffe</span> · ${protein}g Protein bei ${Math.round(g)}g`;
+    `→ <span style="color:var(--accent)">${fiber}g Ballaststoffe</span> · ${protein}g Protein bei ${g}g`;
 }
 
 function searchLogRecipe(q) {
@@ -1884,10 +1830,9 @@ function selectLogRecipe(recipeId) {
   document.getElementById('logRecipeSelected').style.display = 'block';
 }
 
-async function saveLogEntry(btn) {
+async function saveLogEntry() {
   if (!state.selectedFood) return;
-  if (!lockSaveBtn(btn, 'Speichert...')) return; // zweiter Tap während des Speicherns wird ignoriert
-  const grams = getLogFoodGrams() || 100;
+  const grams = parseFloat(document.getElementById('logFoodGrams').value) || 100;
   const logId = 'LG-' + Date.now().toString(36);
   const now = new Date();
   const timeStr = now.toTimeString().slice(0,8);
@@ -1903,14 +1848,11 @@ async function saveLogEntry(btn) {
     renderLogPage();
   } catch(e) {
     alert('Fehler beim Speichern: ' + e.message);
-  } finally {
-    unlockSaveBtn(btn);
   }
 }
 
-async function saveRecipeLogEntry(btn) {
+async function saveRecipeLogEntry() {
   if (!state.selectedRecipe) return;
-  if (!lockSaveBtn(btn, 'Speichert...')) return; // zweiter Tap während des Speicherns wird ignoriert
   const servings = parseFloat(document.getElementById('logRecipeServings').value) || 1;
   const logId = 'LG-' + Date.now().toString(36);
   const now = new Date();
@@ -1927,8 +1869,6 @@ async function saveRecipeLogEntry(btn) {
     renderLogPage();
   } catch(e) {
     alert('Fehler beim Speichern: ' + e.message);
-  } finally {
-    unlockSaveBtn(btn);
   }
 }
 
@@ -2024,10 +1964,9 @@ function generateFoodId() {
   return 'F' + String(max + 1).padStart(4, '0');
 }
 
-async function saveNewFood(btn) {
+async function saveNewFood() {
   const name = document.getElementById('newFoodName').value.trim();
   if (!name) { showError('addFoodError', 'Bitte einen Namen eingeben'); return; }
-  if (!lockSaveBtn(btn, 'Speichert...')) return;
   const unit = document.querySelector('#unitChips .chip.selected')?.textContent || 'g';
   const id = generateFoodId();
   const row = [
@@ -2079,8 +2018,6 @@ async function saveNewFood(btn) {
     const nfz = document.getElementById('nf_zucker'); if(nfz) nfz.value = '';
   } catch(e) {
     showError('addFoodError', 'Fehler: ' + e.message);
-  } finally {
-    unlockSaveBtn(btn);
   }
 }
 
@@ -2189,10 +2126,48 @@ function showDayTypeModal() {
     const name = t.date || `Tag ${i+1}`;
     const emoji = emojis[i] || '📅';
     const active = name === state.dayType;
-    return `<button class="btn ${active?'btn-primary':'btn-secondary'}" onclick="setDayType('${name}','${emoji}')">${emoji} ${name}</button>`;
+    const isDefault = t.is_default === 'TRUE';
+    return `
+      <div style="display:flex;gap:8px;">
+        <button class="btn ${active?'btn-primary':'btn-secondary'}" style="flex:1;" onclick="setDayType('${name}','${emoji}')">${emoji} ${name}</button>
+        <button class="btn btn-secondary" title="Als Standard festlegen" onclick="toggleDefaultDayType('${name}')"
+          style="flex:none;width:46px;padding:0;font-size:17px;color:${isDefault?'var(--accent2)':'var(--text2)'};">${isDefault?'⭐':'☆'}</button>
+      </div>`;
   }).join('');
   document.getElementById('dayTypeButtons').innerHTML = btns || '<div style="color:var(--text2);font-size:13px;">Keine Tagestypen gefunden</div>';
+  document.getElementById('dayTypeButtons').insertAdjacentHTML('beforeend',
+    '<div style="color:var(--text2);font-size:12px;margin-top:2px;">⭐ Als Standard markierter Tagestyp wird beim App-Start automatisch ausgewählt.</div>');
   openModal('dayTypeModal');
+}
+
+async function toggleDefaultDayType(name) {
+  const target = state.targets.find(t => t.date === name);
+  if (!target) return;
+  const newValue = target.is_default === 'TRUE' ? 'FALSE' : 'TRUE';
+  const sheetId = SHEETS.targets !== SHEETS_BASE.targets ? SHEETS.targets : '';
+  try {
+    // Nur ein Standard-Tagestyp gleichzeitig: vorherigen zurücksetzen
+    if (newValue === 'TRUE') {
+      const prevDefault = state.targets.find(t => t.is_default === 'TRUE' && t.date !== name);
+      if (prevDefault) {
+        await fetch(APPS_SCRIPT_URL, {
+          method: 'POST', mode: 'no-cors',
+          headers: {'Content-Type':'text/plain'},
+          body: JSON.stringify({ action: 'updateTarget', dayType: prevDefault.date, fields: { is_default: 'FALSE' }, sheetId: sheetId || undefined })
+        });
+        prevDefault.is_default = 'FALSE';
+      }
+    }
+    await fetch(APPS_SCRIPT_URL, {
+      method: 'POST', mode: 'no-cors',
+      headers: {'Content-Type':'text/plain'},
+      body: JSON.stringify({ action: 'updateTarget', dayType: name, fields: { is_default: newValue }, sheetId: sheetId || undefined })
+    });
+    target.is_default = newValue;
+    showDayTypeModal();
+  } catch (e) {
+    alert('Fehler: ' + e.message);
+  }
 }
 
 function setDayType(type, emoji) {
@@ -2329,11 +2304,6 @@ async function openVariantPrompt(recipeId) {
 // ============================================================
 // EDIT FOOD
 // ============================================================
-function updateEditPortionLabel(unit) {
-  const label = document.getElementById('editFoodPortionLabel');
-  if (label) label.textContent = unit === 'Stück' ? 'Gramm pro Stück' : 'Std. Portion (g)';
-}
-
 function showEditFoodModal(foodId) {
   const food = state.foods.find(f => f.food_id === foodId);
   if (!food) return;
@@ -2371,16 +2341,10 @@ function showEditFoodModal(foodId) {
   for (let i = 0; i < catSelect.options.length; i++) {
     if (catSelect.options[i].value === food.category) { catSelect.selectedIndex = i; break; }
   }
-  const unitVal = food.unit_type || 'g';
-  document.querySelectorAll('#editUnitChips .chip').forEach(c => {
-    c.classList.toggle('selected', c.dataset.unit === unitVal);
-  });
-  document.getElementById('editFoodPortionLabel').textContent = unitVal === 'Stück' ? 'Gramm pro Stück' : 'Std. Portion (g)';
   openModal('editFoodModal');
 }
 
-async function saveEditFood(btn) {
-  if (!lockSaveBtn(btn, 'Speichert...')) return;
+async function saveEditFood() {
   const foodId = document.getElementById('editFoodId').value;
   const fields = {
     name: document.getElementById('editFoodName').value,
@@ -2412,7 +2376,6 @@ async function saveEditFood(btn) {
     gl: document.getElementById('editFoodGL').value,
     iron_type: document.getElementById('editFoodIronType').value,
     portion_g: document.getElementById('editFoodPortion').value,
-    unit_type: document.querySelector('#editUnitChips .chip.selected')?.dataset.unit || 'g',
   };
   try {
     await fetch(APPS_SCRIPT_URL, {
@@ -2429,8 +2392,6 @@ async function saveEditFood(btn) {
     renderFoods();
   } catch(e) {
     alert('Fehler: ' + e.message);
-  } finally {
-    unlockSaveBtn(btn);
   }
 }
 
@@ -2505,8 +2466,7 @@ function searchEditIngredient(q) {
   }).join('');
 }
 
-async function saveEditRecipe(btn) {
-  if (!lockSaveBtn(btn, 'Speichert...')) return;
+async function saveEditRecipe() {
   const recipeId = document.getElementById('editRecipeId').value;
   const fields = {
     name: document.getElementById('editRecipeName').value,
@@ -2537,8 +2497,6 @@ async function saveEditRecipe(btn) {
     renderRecipes();
   } catch(e) {
     alert('Fehler: ' + e.message);
-  } finally {
-    unlockSaveBtn(btn);
   }
 }
 
@@ -3236,7 +3194,7 @@ async function saveMealprepWizard() {
       `⚠️ Achtung: ${checkedCount + mp.gifted} Portionen verplant, aber nur ${mp.portions} gekocht. Wird trotzdem gespeichert.`;
   }
   const btn = document.querySelector('#mealprepModal .btn-primary');
-  if (!lockSaveBtn(btn, 'Speichert...')) return;
+  if (btn) { btn.disabled = true; btn.textContent = 'Speichern...'; }
 
   try {
     // 1) Kochtermin anlegen
@@ -3634,7 +3592,7 @@ function renderTageszielModal(target) {
     `<button class="btn ${t.date===state.dayType?'btn-primary':'btn-secondary'}"
       style="font-size:12px;padding:6px 10px;"
       onclick="state.dayType='${t.date}';renderTageszielModal(getTodayTarget());">
-      ${t.date}
+      ${t.is_default==='TRUE'?'⭐ ':''}${t.date}
     </button>`
   ).join('');
 
@@ -3696,7 +3654,7 @@ function renderTageszielModal(target) {
 
     <!-- Zielwerte -->
     <div style="max-height:50vh;overflow-y:auto;">${rows}</div>
-    <button class="btn btn-primary" onclick="saveTagesziele(this)" style="margin-top:12px;">Speichern ✓</button>
+    <button class="btn btn-primary" onclick="saveTagesziele()" style="margin-top:12px;">Speichern ✓</button>
   `;
 }
 
@@ -3756,8 +3714,7 @@ async function deleteTarget() {
   } catch(e) { alert('Fehler: ' + e.message); }
 }
 
-async function saveTagesziele(btn) {
-  if (!lockSaveBtn(btn, 'Speichert...')) return;
+async function saveTagesziele() {
   const target = getTodayTarget();
   const fields = ['kcal_target','protein_g','carb_g','fat_g','fiber_g','zucker_g',
     'gi_avg_target','gl_daily_target','vitamin_c_mg','vitamin_a_rae_ug','vitamin_d_iu',
@@ -3786,8 +3743,6 @@ async function saveTagesziele(btn) {
     alert('✓ Ziele gespeichert!');
   } catch(e) {
     alert('Fehler: ' + e.message);
-  } finally {
-    unlockSaveBtn(btn);
   }
 }
 
@@ -4091,7 +4046,7 @@ function renderAssistant() {
     }
     html += `
       <div id="wizErr" class="error-msg" style="display:none;"></div>
-      <button class="btn btn-primary" onclick="wizSave(this)" style="margin-top:8px;">✓ Speichern</button>`;
+      <button class="btn btn-primary" onclick="wizSave()" style="margin-top:8px;">✓ Speichern</button>`;
   }
 
   c.innerHTML = html;
@@ -4272,8 +4227,7 @@ async function wizSaveTarget(name, macros) {
   }
 }
 
-async function wizSave(btn) {
-  if (!lockSaveBtn(btn, 'Speichert...')) return;
+async function wizSave() {
   const rest = wizReadMacroBlock('restFinal');
   const avg = wizReadMacroBlock('avgFinal');
   const sport = wiz.data.sportMacros ? wizReadMacroBlock('sportFinal') : null;
@@ -4291,8 +4245,6 @@ async function wizSave(btn) {
     alert('✓ Tagesziele gespeichert!');
   } catch (e) {
     wizShowErr(e.message);
-  } finally {
-    unlockSaveBtn(btn);
   }
 }
 
@@ -4465,20 +4417,12 @@ loadLayout();
         <option value="non-haem">Nicht-Häm-Eisen (Pflanzen, Eier, Milch)</option>
       </select>
     </div>
-    <div class="form-group">
-      <label class="form-label">Einheit</label>
-      <div class="chips" id="editUnitChips">
-        <div class="chip" data-unit="g" onclick="selectChip(this,'unit');updateEditPortionLabel('g')">g</div>
-        <div class="chip" data-unit="ml" onclick="selectChip(this,'unit');updateEditPortionLabel('ml')">ml</div>
-        <div class="chip" data-unit="Stück" onclick="selectChip(this,'unit');updateEditPortionLabel('Stück')">Stück</div>
-      </div>
-    </div>
     <div class="row">
-      <div class="form-group"><label class="form-label" id="editFoodPortionLabel">Std. Portion (g)</label><input class="form-input" id="editFoodPortion" type="number"></div>
+      <div class="form-group"><label class="form-label">Std. Portion (g)</label><input class="form-input" id="editFoodPortion" type="number"></div>
       <div class="form-group"><label class="form-label">Dichte (g/ml)</label><input class="form-input" id="editFoodDensity" type="number" step="0.01" placeholder="nur für Flüssigkeiten"></div>
     </div>
     <input type="hidden" id="editFoodId">
-    <button class="btn btn-primary" onclick="saveEditFood(this)" style="margin-top:8px;">Speichern ✓</button>
+    <button class="btn btn-primary" onclick="saveEditFood()" style="margin-top:8px;">Speichern ✓</button>
   </div>
 </div>
 
@@ -4547,7 +4491,7 @@ loadLayout();
     </div>
     <div class="search-results" id="editIngredientResults" style="margin-bottom:14px;max-height:200px;overflow-y:auto;"></div>
     <input type="hidden" id="editRecipeId">
-    <button class="btn btn-primary" onclick="saveEditRecipe(this)" style="margin-top:8px;">Speichern ✓</button>
+    <button class="btn btn-primary" onclick="saveEditRecipe()" style="margin-top:8px;">Speichern ✓</button>
   </div>
 </div>
 
@@ -4568,7 +4512,7 @@ loadLayout();
     <button class="modal-close" onclick="closeModal('tageszielModal')">✕</button>
     <div class="modal-title">🎯 Ziele: <span id="tageszieleName"></span></div>
     <div id="tagesziele_fields"></div>
-    <button class="btn btn-primary" onclick="saveTagesziele(this)" style="margin-top:8px;">Speichern ✓</button>
+    <button class="btn btn-primary" onclick="saveTagesziele()" style="margin-top:8px;">Speichern ✓</button>
   </div>
 </div>
 
