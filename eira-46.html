@@ -2295,6 +2295,11 @@ async function openVariantPrompt(recipeId) {
 // ============================================================
 // EDIT FOOD
 // ============================================================
+function updateEditPortionLabel(unit) {
+  const label = document.getElementById('editFoodPortionLabel');
+  if (label) label.textContent = unit === 'Stück' ? 'Gramm pro Stück' : 'Std. Portion (g)';
+}
+
 function showEditFoodModal(foodId) {
   const food = state.foods.find(f => f.food_id === foodId);
   if (!food) return;
@@ -2332,6 +2337,11 @@ function showEditFoodModal(foodId) {
   for (let i = 0; i < catSelect.options.length; i++) {
     if (catSelect.options[i].value === food.category) { catSelect.selectedIndex = i; break; }
   }
+  const unitVal = food.unit_type || 'g';
+  document.querySelectorAll('#editUnitChips .chip').forEach(c => {
+    c.classList.toggle('selected', c.dataset.unit === unitVal);
+  });
+  document.getElementById('editFoodPortionLabel').textContent = unitVal === 'Stück' ? 'Gramm pro Stück' : 'Std. Portion (g)';
   openModal('editFoodModal');
 }
 
@@ -2367,6 +2377,7 @@ async function saveEditFood() {
     gl: document.getElementById('editFoodGL').value,
     iron_type: document.getElementById('editFoodIronType').value,
     portion_g: document.getElementById('editFoodPortion').value,
+    unit_type: document.querySelector('#editUnitChips .chip.selected')?.dataset.unit || 'g',
   };
   try {
     await fetch(APPS_SCRIPT_URL, {
@@ -4408,8 +4419,16 @@ loadLayout();
         <option value="non-haem">Nicht-Häm-Eisen (Pflanzen, Eier, Milch)</option>
       </select>
     </div>
+    <div class="form-group">
+      <label class="form-label">Einheit</label>
+      <div class="chips" id="editUnitChips">
+        <div class="chip" data-unit="g" onclick="selectChip(this,'unit');updateEditPortionLabel('g')">g</div>
+        <div class="chip" data-unit="ml" onclick="selectChip(this,'unit');updateEditPortionLabel('ml')">ml</div>
+        <div class="chip" data-unit="Stück" onclick="selectChip(this,'unit');updateEditPortionLabel('Stück')">Stück</div>
+      </div>
+    </div>
     <div class="row">
-      <div class="form-group"><label class="form-label">Std. Portion (g)</label><input class="form-input" id="editFoodPortion" type="number"></div>
+      <div class="form-group"><label class="form-label" id="editFoodPortionLabel">Std. Portion (g)</label><input class="form-input" id="editFoodPortion" type="number"></div>
       <div class="form-group"><label class="form-label">Dichte (g/ml)</label><input class="form-input" id="editFoodDensity" type="number" step="0.01" placeholder="nur für Flüssigkeiten"></div>
     </div>
     <input type="hidden" id="editFoodId">
