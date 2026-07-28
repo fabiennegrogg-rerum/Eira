@@ -1141,7 +1141,18 @@ function calcTodayMacros() {
   return macros;
 }
 
+const DAY_TYPE_EMOJIS = ['😴','💼','🏃','🧘','🎯','⚡','🌟'];
+
+function updateDayTypeBadge() {
+  const idx = state.targets.findIndex(t => t.date === state.dayType);
+  const emoji = idx >= 0 ? (DAY_TYPE_EMOJIS[idx] || '📅') : (state.dayEmoji || '📅');
+  state.dayEmoji = emoji;
+  const badge = document.getElementById('dayTypeBadge');
+  if (badge) badge.textContent = emoji + ' ' + state.dayType;
+}
+
 function renderToday() {
+  updateDayTypeBadge();
   const macros = calcTodayMacros();
   const target = getTodayTarget();
 
@@ -2121,7 +2132,7 @@ function showAddRecipeModal() {
 // ============================================================
 function showDayTypeModal() {
   // Dynamisch aus targets-Sheet laden
-  const emojis = ['😴','💼','🏃','🧘','🎯','⚡','🌟'];
+  const emojis = DAY_TYPE_EMOJIS;
   const btns = state.targets.map((t, i) => {
     const name = t.date || `Tag ${i+1}`;
     const emoji = emojis[i] || '📅';
