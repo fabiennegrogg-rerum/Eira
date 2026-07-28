@@ -704,7 +704,7 @@
           <div id="portionHint" style="font-size:11px;color:var(--text2);margin-top:4px;"></div>
         </div>
         <div id="foodPreview" style="font-size:13px;color:var(--text2);margin-bottom:14px;"></div>
-        <button class="btn btn-primary" onclick="saveLogEntry()">Hinzufügen ✓</button>
+        <button class="btn btn-primary" onclick="saveLogEntry(this)">Hinzufügen ✓</button>
       </div>
     </div>
     <div id="logTabRecipe" style="display:none;">
@@ -723,7 +723,7 @@
           <label class="form-label">Anzahl Portionen</label>
           <input class="form-input" type="number" id="logRecipeServings" placeholder="1" value="1" step="0.5" min="0.5">
         </div>
-        <button class="btn btn-primary" onclick="saveRecipeLogEntry()">Hinzufügen ✓</button>
+        <button class="btn btn-primary" onclick="saveRecipeLogEntry(this)">Hinzufügen ✓</button>
       </div>
     </div>
   </div>
@@ -778,7 +778,7 @@
       <div class="form-group"><label class="form-label">Std. Portion (g)</label><input class="form-input" id="nf_portion" type="number" placeholder="100"></div>
     </div>
     <div id="addFoodError" class="error-msg" style="display:none;"></div>
-    <button class="btn btn-primary" onclick="saveNewFood()" style="margin-top:8px;">Speichern ✓</button>
+    <button class="btn btn-primary" onclick="saveNewFood(this)" style="margin-top:8px;">Speichern ✓</button>
   </div>
 </div>
 
@@ -940,6 +940,29 @@ async function fetchSheet(sheetId, tabName=null) {
     } catch(e) { continue; }
   }
   throw new Error('Sheet nicht erreichbar: ' + sheetId);
+}
+
+// ============================================================
+// DOPPEL-SPEICHERUNG VERHINDERN
+// Sperrt einen Button während ein async Speichervorgang läuft,
+// damit ein zweiter Tap (z.B. wegen kurzer Ladeverzögerung) ignoriert wird.
+// ============================================================
+function lockSaveBtn(btn, busyText) {
+  if (!btn) return false;
+  if (btn.disabled) return false; // läuft bereits -> zweiten Klick ignorieren
+  btn.dataset.origText = btn.textContent;
+  btn.disabled = true;
+  btn.style.opacity = '0.6';
+  btn.style.cursor = 'not-allowed';
+  if (busyText) btn.textContent = busyText;
+  return true;
+}
+function unlockSaveBtn(btn) {
+  if (!btn) return;
+  btn.disabled = false;
+  btn.style.opacity = '';
+  btn.style.cursor = '';
+  if (btn.dataset.origText) btn.textContent = btn.dataset.origText;
 }
 
 async function appendRow(sheetId, values) {
@@ -1579,7 +1602,7 @@ function showRecipeDetail(recipeId) {
       <textarea id="ratingComment_${recipeId}" placeholder="Kommentar / Tipp (optional)" 
         style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--text);font-size:13px;resize:vertical;min-height:60px;">${userRating?.comment||''}</textarea>
       <div style="display:flex;gap:8px;margin-top:8px;">
-        <button onclick="saveRating('${recipeId}')" style="background:var(--accent);color:#0f0f0e;border:none;border-radius:8px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer;">Bewertung speichern</button>
+        <button onclick="saveRating('${recipeId}', this)" style="background:var(--accent);color:#0f0f0e;border:none;border-radius:8px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer;">Bewertung speichern</button>
         <button onclick="toggleFavourite('${recipeId}')" style="background:${userRating?.is_favourite==='TRUE'?'rgba(245,200,122,0.2)':'var(--surface)'};border:1px solid ${userRating?.is_favourite==='TRUE'?'var(--accent2)':'var(--border)'};border-radius:8px;padding:8px 14px;font-size:14px;cursor:pointer;">${userRating?.is_favourite==='TRUE'?'❤️ Favorit':'🤍 Favorit'}</button>
       </div>
     </div>
@@ -1606,7 +1629,8 @@ function showRecipeDetail(recipeId) {
   openModal('recipeDetailModal');
 }
 
-async function saveRating(recipeId) {
+async function saveRating(recipeId, btn) {
+  if (!lockSaveBtn(btn, 'Speichert...')) return;
   const stars = document.querySelectorAll(`[onclick^="setRating('${recipeId}"]`);
   let rating = 0;
   stars.forEach((s,i) => { if (s.style.color === 'rgb(245, 200, 122)') rating = i+1; });
@@ -1645,6 +1669,7 @@ async function saveRating(recipeId) {
     showRecipeDetail(recipeId);
     renderRecipes();
   } catch(e) { alert('Fehler: ' + e.message); }
+  finally { unlockSaveBtn(btn); }
 }
 
 let _pendingRating = {};
@@ -1859,8 +1884,9 @@ function selectLogRecipe(recipeId) {
   document.getElementById('logRecipeSelected').style.display = 'block';
 }
 
-async function saveLogEntry() {
+async function saveLogEntry(btn) {
   if (!state.selectedFood) return;
+  if (!lockSaveBtn(btn, 'Speichert...')) return; // zweiter Tap während des Speicherns wird ignoriert
   const grams = getLogFoodGrams() || 100;
   const logId = 'LG-' + Date.now().toString(36);
   const now = new Date();
@@ -1877,11 +1903,14 @@ async function saveLogEntry() {
     renderLogPage();
   } catch(e) {
     alert('Fehler beim Speichern: ' + e.message);
+  } finally {
+    unlockSaveBtn(btn);
   }
 }
 
-async function saveRecipeLogEntry() {
+async function saveRecipeLogEntry(btn) {
   if (!state.selectedRecipe) return;
+  if (!lockSaveBtn(btn, 'Speichert...')) return; // zweiter Tap während des Speicherns wird ignoriert
   const servings = parseFloat(document.getElementById('logRecipeServings').value) || 1;
   const logId = 'LG-' + Date.now().toString(36);
   const now = new Date();
@@ -1898,6 +1927,8 @@ async function saveRecipeLogEntry() {
     renderLogPage();
   } catch(e) {
     alert('Fehler beim Speichern: ' + e.message);
+  } finally {
+    unlockSaveBtn(btn);
   }
 }
 
@@ -1993,9 +2024,10 @@ function generateFoodId() {
   return 'F' + String(max + 1).padStart(4, '0');
 }
 
-async function saveNewFood() {
+async function saveNewFood(btn) {
   const name = document.getElementById('newFoodName').value.trim();
   if (!name) { showError('addFoodError', 'Bitte einen Namen eingeben'); return; }
+  if (!lockSaveBtn(btn, 'Speichert...')) return;
   const unit = document.querySelector('#unitChips .chip.selected')?.textContent || 'g';
   const id = generateFoodId();
   const row = [
@@ -2047,6 +2079,8 @@ async function saveNewFood() {
     const nfz = document.getElementById('nf_zucker'); if(nfz) nfz.value = '';
   } catch(e) {
     showError('addFoodError', 'Fehler: ' + e.message);
+  } finally {
+    unlockSaveBtn(btn);
   }
 }
 
@@ -2345,7 +2379,8 @@ function showEditFoodModal(foodId) {
   openModal('editFoodModal');
 }
 
-async function saveEditFood() {
+async function saveEditFood(btn) {
+  if (!lockSaveBtn(btn, 'Speichert...')) return;
   const foodId = document.getElementById('editFoodId').value;
   const fields = {
     name: document.getElementById('editFoodName').value,
@@ -2394,6 +2429,8 @@ async function saveEditFood() {
     renderFoods();
   } catch(e) {
     alert('Fehler: ' + e.message);
+  } finally {
+    unlockSaveBtn(btn);
   }
 }
 
@@ -2468,7 +2505,8 @@ function searchEditIngredient(q) {
   }).join('');
 }
 
-async function saveEditRecipe() {
+async function saveEditRecipe(btn) {
+  if (!lockSaveBtn(btn, 'Speichert...')) return;
   const recipeId = document.getElementById('editRecipeId').value;
   const fields = {
     name: document.getElementById('editRecipeName').value,
@@ -2499,6 +2537,8 @@ async function saveEditRecipe() {
     renderRecipes();
   } catch(e) {
     alert('Fehler: ' + e.message);
+  } finally {
+    unlockSaveBtn(btn);
   }
 }
 
@@ -3196,7 +3236,7 @@ async function saveMealprepWizard() {
       `⚠️ Achtung: ${checkedCount + mp.gifted} Portionen verplant, aber nur ${mp.portions} gekocht. Wird trotzdem gespeichert.`;
   }
   const btn = document.querySelector('#mealprepModal .btn-primary');
-  if (btn) { btn.disabled = true; btn.textContent = 'Speichern...'; }
+  if (!lockSaveBtn(btn, 'Speichert...')) return;
 
   try {
     // 1) Kochtermin anlegen
@@ -3656,7 +3696,7 @@ function renderTageszielModal(target) {
 
     <!-- Zielwerte -->
     <div style="max-height:50vh;overflow-y:auto;">${rows}</div>
-    <button class="btn btn-primary" onclick="saveTagesziele()" style="margin-top:12px;">Speichern ✓</button>
+    <button class="btn btn-primary" onclick="saveTagesziele(this)" style="margin-top:12px;">Speichern ✓</button>
   `;
 }
 
@@ -3716,7 +3756,8 @@ async function deleteTarget() {
   } catch(e) { alert('Fehler: ' + e.message); }
 }
 
-async function saveTagesziele() {
+async function saveTagesziele(btn) {
+  if (!lockSaveBtn(btn, 'Speichert...')) return;
   const target = getTodayTarget();
   const fields = ['kcal_target','protein_g','carb_g','fat_g','fiber_g','zucker_g',
     'gi_avg_target','gl_daily_target','vitamin_c_mg','vitamin_a_rae_ug','vitamin_d_iu',
@@ -3745,6 +3786,8 @@ async function saveTagesziele() {
     alert('✓ Ziele gespeichert!');
   } catch(e) {
     alert('Fehler: ' + e.message);
+  } finally {
+    unlockSaveBtn(btn);
   }
 }
 
@@ -4048,7 +4091,7 @@ function renderAssistant() {
     }
     html += `
       <div id="wizErr" class="error-msg" style="display:none;"></div>
-      <button class="btn btn-primary" onclick="wizSave()" style="margin-top:8px;">✓ Speichern</button>`;
+      <button class="btn btn-primary" onclick="wizSave(this)" style="margin-top:8px;">✓ Speichern</button>`;
   }
 
   c.innerHTML = html;
@@ -4229,7 +4272,8 @@ async function wizSaveTarget(name, macros) {
   }
 }
 
-async function wizSave() {
+async function wizSave(btn) {
+  if (!lockSaveBtn(btn, 'Speichert...')) return;
   const rest = wizReadMacroBlock('restFinal');
   const avg = wizReadMacroBlock('avgFinal');
   const sport = wiz.data.sportMacros ? wizReadMacroBlock('sportFinal') : null;
@@ -4247,6 +4291,8 @@ async function wizSave() {
     alert('✓ Tagesziele gespeichert!');
   } catch (e) {
     wizShowErr(e.message);
+  } finally {
+    unlockSaveBtn(btn);
   }
 }
 
@@ -4432,7 +4478,7 @@ loadLayout();
       <div class="form-group"><label class="form-label">Dichte (g/ml)</label><input class="form-input" id="editFoodDensity" type="number" step="0.01" placeholder="nur für Flüssigkeiten"></div>
     </div>
     <input type="hidden" id="editFoodId">
-    <button class="btn btn-primary" onclick="saveEditFood()" style="margin-top:8px;">Speichern ✓</button>
+    <button class="btn btn-primary" onclick="saveEditFood(this)" style="margin-top:8px;">Speichern ✓</button>
   </div>
 </div>
 
@@ -4501,7 +4547,7 @@ loadLayout();
     </div>
     <div class="search-results" id="editIngredientResults" style="margin-bottom:14px;max-height:200px;overflow-y:auto;"></div>
     <input type="hidden" id="editRecipeId">
-    <button class="btn btn-primary" onclick="saveEditRecipe()" style="margin-top:8px;">Speichern ✓</button>
+    <button class="btn btn-primary" onclick="saveEditRecipe(this)" style="margin-top:8px;">Speichern ✓</button>
   </div>
 </div>
 
@@ -4522,7 +4568,7 @@ loadLayout();
     <button class="modal-close" onclick="closeModal('tageszielModal')">✕</button>
     <div class="modal-title">🎯 Ziele: <span id="tageszieleName"></span></div>
     <div id="tagesziele_fields"></div>
-    <button class="btn btn-primary" onclick="saveTagesziele()" style="margin-top:8px;">Speichern ✓</button>
+    <button class="btn btn-primary" onclick="saveTagesziele(this)" style="margin-top:8px;">Speichern ✓</button>
   </div>
 </div>
 
