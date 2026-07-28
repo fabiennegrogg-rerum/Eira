@@ -698,8 +698,9 @@
           <div style="font-size:12px;color:var(--text2);margin-top:4px;" id="selectedFoodMacros"></div>
         </div>
         <div class="form-group">
-          <label class="form-label">Menge (g)</label>
+          <label class="form-label" id="logFoodGramsLabel">Menge (g)</label>
           <input class="form-input" type="number" id="logFoodGrams" placeholder="100" value="100" oninput="updateFoodPreview()">
+          <div id="stkGramsDisplay" style="font-size:12px;color:var(--text2);margin-top:4px;display:none;"></div>
           <div id="portionHint" style="font-size:11px;color:var(--text2);margin-top:4px;"></div>
         </div>
         <div id="foodPreview" style="font-size:13px;color:var(--text2);margin-bottom:14px;"></div>
@@ -1754,15 +1755,17 @@ function switchLogTab(tab, btn) {
 function searchLogFood(q) {
   if (!q) { document.getElementById('logFoodResults').innerHTML = ''; return; }
   const results = state.foods.filter(f => f.name?.toLowerCase().includes(q.toLowerCase())).slice(0, 8);
-  document.getElementById('logFoodResults').innerHTML = results.map(f =>
-    `<div class="search-result-item" onclick="selectLogFood('${f.food_id}')">
+  document.getElementById('logFoodResults').innerHTML = results.map(f => {
+    const isStk = (f.unit_type === 'Stück' || f.unit_type === 'Stk');
+    const portionText = isStk ? `1 Stück ≈ ${f.portion_g||f.portion_def||f.default_serv||100}g` : `${f.portion_g||f.portion_def||f.default_serv||100}g Standard`;
+    return `<div class="search-result-item" onclick="selectLogFood('${f.food_id}')">
       <div>
         <div class="result-name">${f.name}</div>
-        <div class="result-detail">${f.category||''} · ${f.portion_def||f.default_serv||100}g Standard</div>
+        <div class="result-detail">${f.category||''} · ${portionText}</div>
       </div>
       <div class="result-fiber">${f.fiber_g||0}g 🌿</div>
-    </div>`
-  ).join('');
+    </div>`;
+  }).join('');
 }
 
 function selectLogFood(foodId) {
@@ -1774,30 +1777,64 @@ function selectLogFood(foodId) {
   document.getElementById('selectedFoodName').textContent = food.name;
   document.getElementById('selectedFoodMacros').textContent =
     `P: ${food.protein_g||0}g · KH: ${food.carb_g||0}g · F: ${food.fat_g||0}g · Balaststoffe: ${food.fiber_g||0}g (pro 100g)`;
-  const defaultPortion = food.portion_def || food.portion_default || food.default_serv || 100;
-  document.getElementById('logFoodGrams').value = defaultPortion;
-  // Show portion hint
-  const min = food.portion_min || '';
-  const max = food.portion_max || '';
+  const defaultPortion = food.portion_g || food.portion_def || food.portion_default || food.default_serv || 100;
+  const isStk = (food.unit_type === 'Stück' || food.unit_type === 'Stk');
+  const label = document.getElementById('logFoodGramsLabel');
+  const input = document.getElementById('logFoodGrams');
+  const stkDisplay = document.getElementById('stkGramsDisplay');
   const hint = document.getElementById('portionHint');
-  if (hint) {
-    let hintText = `Standard: ${defaultPortion}g`;
-    if (min && max) hintText += ` · Min: ${min}g · Max: ${max}g`;
-    hint.textContent = hintText;
+  if (isStk) {
+    label.textContent = 'Anzahl Stück';
+    input.value = 1;
+    input.step = '0.5';
+    input.placeholder = '1';
+    stkDisplay.style.display = 'block';
+    if (hint) hint.textContent = `1 Stück ≈ ${defaultPortion}g`;
+  } else {
+    label.textContent = 'Menge (g)';
+    input.value = defaultPortion;
+    input.step = '1';
+    input.placeholder = '100';
+    stkDisplay.style.display = 'none';
+    const min = food.portion_min || '';
+    const max = food.portion_max || '';
+    if (hint) {
+      let hintText = `Standard: ${defaultPortion}g`;
+      if (min && max) hintText += ` · Min: ${min}g · Max: ${max}g`;
+      hint.textContent = hintText;
+    }
   }
   document.getElementById('logFoodSelected').style.display = 'block';
   updateFoodPreview();
 }
 
+function getLogFoodGrams() {
+  // Returns the effective grams for the currently selected food, accounting for Stück-based items.
+  const f = state.selectedFood;
+  if (!f) return 0;
+  const raw = parseFloat(document.getElementById('logFoodGrams').value) || 0;
+  const isStk = (f.unit_type === 'Stück' || f.unit_type === 'Stk');
+  if (isStk) {
+    const gramsPerStk = parseFloat(f.portion_g) || 100;
+    return raw * gramsPerStk;
+  }
+  return raw;
+}
+
 function updateFoodPreview() {
   if (!state.selectedFood) return;
-  const g = parseFloat(document.getElementById('logFoodGrams').value) || 100;
   const f = state.selectedFood;
+  const g = getLogFoodGrams() || 100;
+  const isStk = (f.unit_type === 'Stück' || f.unit_type === 'Stk');
+  if (isStk) {
+    const count = parseFloat(document.getElementById('logFoodGrams').value) || 0;
+    document.getElementById('stkGramsDisplay').textContent = `≈ ${Math.round(g)}g`;
+  }
   const factor = g / 100;
   const fiber = ((parseFloat(f.fiber_g)||0) * factor).toFixed(1);
   const protein = ((parseFloat(f.protein_g)||0) * factor).toFixed(1);
   document.getElementById('foodPreview').innerHTML =
-    `→ <span style="color:var(--accent)">${fiber}g Ballaststoffe</span> · ${protein}g Protein bei ${g}g`;
+    `→ <span style="color:var(--accent)">${fiber}g Ballaststoffe</span> · ${protein}g Protein bei ${Math.round(g)}g`;
 }
 
 function searchLogRecipe(q) {
@@ -1824,7 +1861,7 @@ function selectLogRecipe(recipeId) {
 
 async function saveLogEntry() {
   if (!state.selectedFood) return;
-  const grams = parseFloat(document.getElementById('logFoodGrams').value) || 100;
+  const grams = getLogFoodGrams() || 100;
   const logId = 'LG-' + Date.now().toString(36);
   const now = new Date();
   const timeStr = now.toTimeString().slice(0,8);
