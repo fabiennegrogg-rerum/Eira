@@ -536,6 +536,7 @@
     <div class="modal-title" id="profileModalTitle">Profil</div>
     <div style="display:flex;flex-direction:column;gap:10px;">
       <button class="btn btn-secondary" onclick="closeModal('profileModal');showLayoutModal();">🎨 Layout anpassen</button>
+      <button class="btn btn-secondary" onclick="closeModal('profileModal');openAssistant();" style="color:var(--accent2);">🧭 Ziel-Assistent</button>
       <div style="border-top:1px solid var(--border);padding-top:10px;">
         <button class="btn btn-secondary" onclick="switchUser()" style="color:var(--text2);">🔄 Nutzer wechseln</button>
       </div>
@@ -3591,6 +3592,8 @@ function renderTageszielModal(target) {
     <button class="modal-close" onclick="closeModal('tageszielModal')">✕</button>
     <div class="modal-title">🎯 Tagesziele</div>
 
+    <button class="btn btn-secondary" onclick="closeModal('tageszielModal');openAssistant();" style="color:var(--accent2);margin-bottom:12px;">🧭 Ziele automatisch ermitteln</button>
+
     <!-- Tagestyp Tabs -->
     <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;">${tabs}</div>
 
@@ -3694,6 +3697,508 @@ async function saveTagesziele() {
     alert('✓ Ziele gespeichert!');
   } catch(e) {
     alert('Fehler: ' + e.message);
+  }
+}
+
+// ============================================================
+// ZIEL-ASSISTENT (Onboarding-Wizard für Tagesziele)
+// ============================================================
+let wiz = { step: 'intro', data: {} };
+
+const WIZ_PAL_OPTIONS = [
+  { v: '1.2',   l: 'Sitzend / kaum Bewegung' },
+  { v: '1.375', l: 'Leicht aktiv (1–3× Sport/Woche)' },
+  { v: '1.55',  l: 'Aktiv (3–5× Sport/Woche)' },
+  { v: '1.725', l: 'Sehr aktiv (6–7× Sport/Woche, körperl. Arbeit)' },
+];
+
+const WIZ_SPORT_TYPES = [
+  { v: 'ausdauer', l: '🏃 Ausdauer (Laufen, Rad, Schwimmen...)' },
+  { v: 'kraft',    l: '🏋️ Krafttraining' },
+  { v: 'hiit',     l: '⚡ HIIT / Intervall' },
+  { v: 'gemischt', l: '🔀 Gemischt' },
+];
+
+const WIZ_SPORT_DURATIONS = [
+  { v: '30',  l: '~30 Min' },
+  { v: '45',  l: '~45 Min' },
+  { v: '60',  l: '~60 Min' },
+  { v: '90',  l: '~90 Min' },
+  { v: '120', l: '~120 Min' },
+];
+
+// kcal/Stunde Richtwerte (moderate Intensität)
+const WIZ_SPORT_KCAL_PER_H = { ausdauer: 550, kraft: 300, hiit: 600, gemischt: 450 };
+// Anteil der Zusatz-Kalorien aus Protein/KH/Fett je Trainingstyp
+const WIZ_SPORT_SPLIT = {
+  ausdauer: { p: 0.15, c: 0.70, f: 0.15 },
+  kraft:    { p: 0.35, c: 0.45, f: 0.20 },
+  hiit:     { p: 0.25, c: 0.55, f: 0.20 },
+  gemischt: { p: 0.25, c: 0.55, f: 0.20 },
+};
+
+function openAssistant() {
+  wiz = { step: 'intro', data: {} };
+  renderAssistant();
+  openModal('assistantModal');
+}
+
+function closeAssistant() {
+  closeModal('assistantModal');
+}
+
+function wizGo(step) {
+  wiz.step = step;
+  renderAssistant();
+}
+
+function wizVal(id) {
+  const el = document.getElementById(id);
+  return el ? el.value.trim() : '';
+}
+
+function wizCalcBMR(weight, height, age, gender) {
+  const base = 10 * weight + 6.25 * height - 5 * age;
+  return gender === 'm' ? base + 5 : base - 161;
+}
+
+function wizProteinPerKg(pal) {
+  if (pal <= 1.2) return 0.8;
+  if (pal <= 1.375) return 1.0;
+  if (pal <= 1.55) return 1.3;
+  return 1.6;
+}
+
+function wizComputeMacros(kcalTarget, weight, pal) {
+  const protein_g = Math.round(weight * wizProteinPerKg(pal));
+  const fat_g = Math.round(weight * 1.0);
+  let carb_g = Math.round((kcalTarget - protein_g * 4 - fat_g * 9) / 4);
+  if (carb_g < 0) carb_g = 0;
+  const fiber_g = Math.round(kcalTarget / 1000 * 14);
+  return { kcal_target: Math.round(kcalTarget), protein_g, fat_g, carb_g, fiber_g };
+}
+
+function wizIronTarget(gender, age, deficiency) {
+  let base = (gender === 'w' && age < 50) ? 18 : 9;
+  if (deficiency) base = Math.round(base * 1.5);
+  return base;
+}
+
+function renderAssistant() {
+  const c = document.getElementById('assistantContent');
+  const d = wiz.data;
+  let html = '';
+
+  if (wiz.step === 'intro') {
+    html = `
+      <p style="color:var(--text2);font-size:14px;line-height:1.5;margin-bottom:16px;">
+        In wenigen Schritten ermitteln wir passende Tagesziele für dich – für einen
+        <b>Ruhetag</b>, einen <b>Durchschnittstag</b> und optional einen <b>Sporttag</b>.
+        Bereits vorhandene Tagestypen mit gleichem Namen werden überschrieben.
+      </p>
+      <button class="btn btn-primary" onclick="wizGo('wearable')">Los geht's →</button>`;
+  }
+
+  else if (wiz.step === 'wearable') {
+    html = `
+      <div class="form-group">
+        <label class="form-label">Kennst du deinen Kalorienverbrauch (z.B. von einer Fitnessuhr/App)?</label>
+      </div>
+      <div style="display:flex;gap:10px;">
+        <button class="btn btn-primary" style="flex:1;" onclick="wizGo('wearable_yes')">Ja</button>
+        <button class="btn btn-secondary" style="flex:1;" onclick="wizGo('mifflin_ask')">Nein</button>
+      </div>`;
+  }
+
+  else if (wiz.step === 'wearable_yes') {
+    html = `
+      <div class="form-group">
+        <label class="form-label">🛌 Ruheumsatz (kcal, optional)</label>
+        <input class="form-input" type="number" id="wiz_restKcal" value="${d.restKcal||''}" placeholder="z.B. 1600">
+      </div>
+      <div class="form-group">
+        <label class="form-label">📊 Durchschnittsverbrauch (kcal, optional)</label>
+        <input class="form-input" type="number" id="wiz_avgKcal" value="${d.avgKcal||''}" placeholder="z.B. 2100">
+      </div>
+      <div id="wizErr" class="error-msg" style="display:none;"></div>
+      <button class="btn btn-primary" onclick="wizSubmitWearable()">Weiter →</button>`;
+  }
+
+  else if (wiz.step === 'mifflin_ask') {
+    html = `
+      <div class="form-group">
+        <label class="form-label">Soll ich deinen Kalorienverbrauch mit der Mifflin-St-Jeor-Formel aus deinem Gewicht, deiner Grösse und deinem Aktivitätslevel berechnen?</label>
+      </div>
+      <div style="display:flex;gap:10px;">
+        <button class="btn btn-primary" style="flex:1;" onclick="wizGo('mifflin_form')">Ja</button>
+        <button class="btn btn-secondary" style="flex:1;" onclick="wizGo('manual_kcal')">Nein</button>
+      </div>`;
+  }
+
+  else if (wiz.step === 'mifflin_form') {
+    html = `
+      <div class="form-group">
+        <label class="form-label">⚖️ Gewicht (kg)</label>
+        <input class="form-input" type="number" id="wiz_weight" value="${d.weight||''}" placeholder="z.B. 65">
+      </div>
+      <div class="form-group">
+        <label class="form-label">📏 Grösse (cm)</label>
+        <input class="form-input" type="number" id="wiz_height" value="${d.height||''}" placeholder="z.B. 170">
+      </div>
+      <div class="form-group">
+        <label class="form-label">🎂 Alter</label>
+        <input class="form-input" type="number" id="wiz_age" value="${d.age||''}" placeholder="z.B. 30">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Geschlecht</label>
+        <select class="form-select" id="wiz_gender">
+          <option value="w" ${d.gender==='w'?'selected':''}>Frau</option>
+          <option value="m" ${d.gender==='m'?'selected':''}>Mann</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Aktivitätslevel</label>
+        <select class="form-select" id="wiz_pal">
+          ${WIZ_PAL_OPTIONS.map(o=>`<option value="${o.v}" ${d.pal===o.v?'selected':''}>${o.l}</option>`).join('')}
+        </select>
+      </div>
+      <div id="wizErr" class="error-msg" style="display:none;"></div>
+      <button class="btn btn-primary" onclick="wizSubmitMifflin()">Weiter →</button>`;
+  }
+
+  else if (wiz.step === 'manual_kcal') {
+    html = `
+      <div class="form-group">
+        <label class="form-label">🔥 Dein geschätzter täglicher Kalorienbedarf (kcal)</label>
+        <input class="form-input" type="number" id="wiz_manualKcal" value="${d.avgKcal||''}" placeholder="z.B. 2000">
+      </div>
+      <p style="color:var(--text2);font-size:12px;margin-bottom:12px;">Der Ruhetag wird automatisch mit ca. 10% weniger Kalorien berechnet.</p>
+      <div id="wizErr" class="error-msg" style="display:none;"></div>
+      <button class="btn btn-primary" onclick="wizSubmitManual()">Weiter →</button>`;
+  }
+
+  else if (wiz.step === 'profile') {
+    html = `
+      <p style="color:var(--text2);font-size:13px;margin-bottom:12px;">Diese Angaben nutzen wir für deine Protein-, Fett- und Kohlenhydrat-Ziele.</p>
+      <div class="form-group">
+        <label class="form-label">⚖️ Gewicht (kg)</label>
+        <input class="form-input" type="number" id="wiz_weight2" value="${d.weight||''}" placeholder="z.B. 65">
+      </div>
+      <div class="form-group">
+        <label class="form-label">🎂 Alter</label>
+        <input class="form-input" type="number" id="wiz_age2" value="${d.age||''}" placeholder="z.B. 30">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Geschlecht</label>
+        <select class="form-select" id="wiz_gender2">
+          <option value="w" ${d.gender==='w'?'selected':''}>Frau</option>
+          <option value="m" ${d.gender==='m'?'selected':''}>Mann</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Aktivitätslevel</label>
+        <select class="form-select" id="wiz_pal2">
+          ${WIZ_PAL_OPTIONS.map(o=>`<option value="${o.v}" ${d.pal===o.v?'selected':''}>${o.l}</option>`).join('')}
+        </select>
+      </div>
+      <div id="wizErr" class="error-msg" style="display:none;"></div>
+      <button class="btn btn-primary" onclick="wizSubmitProfile()">Weiter →</button>`;
+  }
+
+  else if (wiz.step === 'macros_review') {
+    const rest = d.restMacros, avg = d.avgMacros;
+    html = `
+      <p style="color:var(--text2);font-size:13px;margin-bottom:12px;">Berechnete Ziele – du kannst sie noch anpassen.</p>
+      ${wizMacroBlock('Ruhetag 🛌', 'rest', rest)}
+      ${wizMacroBlock('Durchschnittstag 📊', 'avg', avg)}
+      <div style="display:flex;gap:10px;margin-top:8px;">
+        <button class="btn btn-secondary" style="flex:1;" onclick="wizGo('${d.cameFrom||'wearable'}')">← Zurück</button>
+        <button class="btn btn-primary" style="flex:1;" onclick="wizSubmitMacrosReview()">Weiter →</button>
+      </div>`;
+  }
+
+  else if (wiz.step === 'health') {
+    html = `
+      <div class="form-group" style="display:flex;align-items:center;gap:10px;">
+        <input type="checkbox" id="wiz_diabetes" ${d.diabetes?'checked':''} style="width:18px;height:18px;">
+        <label class="form-label" style="margin:0;">Diabetes / Prädiabetes vorhanden</label>
+      </div>
+      <div class="form-group" style="display:flex;align-items:center;gap:10px;">
+        <input type="checkbox" id="wiz_iron" ${d.ironDeficiency?'checked':''} style="width:18px;height:18px;">
+        <label class="form-label" style="margin:0;">Eisenmangel bekannt</label>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Sonstiger Mangel / Hinweis (optional, z.B. Vitamin D, B12, Jod)</label>
+        <input class="form-input" id="wiz_otherNote" value="${d.otherNotes||''}" placeholder="Freitext...">
+      </div>
+      <p style="color:var(--text2);font-size:12px;margin-bottom:12px;">Sonstige Hinweise werden nicht automatisch berechnet – bitte den betroffenen Zielwert danach manuell in den Tageszielen anpassen.</p>
+      <button class="btn btn-primary" onclick="wizSubmitHealth()">Weiter →</button>`;
+  }
+
+  else if (wiz.step === 'sport_ask') {
+    html = `
+      <div class="form-group">
+        <label class="form-label">Hast du einen Sporttag mit zusätzlichem Kalorienverbrauch?</label>
+      </div>
+      <div style="display:flex;gap:10px;">
+        <button class="btn btn-primary" style="flex:1;" onclick="wizGo('sport_known')">Ja</button>
+        <button class="btn btn-secondary" style="flex:1;" onclick="wizGo('summary')">Nein</button>
+      </div>`;
+  }
+
+  else if (wiz.step === 'sport_known') {
+    html = `
+      <div class="form-group">
+        <label class="form-label">Kennst du deinen Kalorien-Mehrverbrauch an Trainingstagen (z.B. vom Wearable)?</label>
+      </div>
+      <div style="display:flex;gap:10px;">
+        <button class="btn btn-primary" style="flex:1;" onclick="wizGo('sport_manual')">Ja</button>
+        <button class="btn btn-secondary" style="flex:1;" onclick="wizGo('sport_estimate')">Nein, schätzen</button>
+      </div>`;
+  }
+
+  else if (wiz.step === 'sport_manual') {
+    html = `
+      <div class="form-group">
+        <label class="form-label">🔥 Zusätzlicher Kalorienverbrauch am Sporttag (kcal)</label>
+        <input class="form-input" type="number" id="wiz_sportKcal" value="${d.sportExtraKcal||''}" placeholder="z.B. 400">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Haupt-Trainingstyp (für Protein-Anpassung)</label>
+        <select class="form-select" id="wiz_sportType">
+          ${WIZ_SPORT_TYPES.map(o=>`<option value="${o.v}" ${d.sportType===o.v?'selected':''}>${o.l}</option>`).join('')}
+        </select>
+      </div>
+      <div id="wizErr" class="error-msg" style="display:none;"></div>
+      <button class="btn btn-primary" onclick="wizSubmitSportManual()">Weiter →</button>`;
+  }
+
+  else if (wiz.step === 'sport_estimate') {
+    html = `
+      <div class="form-group">
+        <label class="form-label">Trainingstyp</label>
+        <select class="form-select" id="wiz_sportType2">
+          ${WIZ_SPORT_TYPES.map(o=>`<option value="${o.v}" ${d.sportType===o.v?'selected':''}>${o.l}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Dauer</label>
+        <select class="form-select" id="wiz_sportDuration">
+          ${WIZ_SPORT_DURATIONS.map(o=>`<option value="${o.v}" ${d.sportDuration===o.v?'selected':''}>${o.l}</option>`).join('')}
+        </select>
+      </div>
+      <p style="color:var(--text2);font-size:12px;margin-bottom:12px;">Richtwerte für moderate Intensität – bei Bedarf danach manuell anpassen.</p>
+      <button class="btn btn-primary" onclick="wizSubmitSportEstimate()">Weiter →</button>`;
+  }
+
+  else if (wiz.step === 'summary') {
+    html = `<p style="color:var(--text2);font-size:13px;margin-bottom:12px;">Diese Tagestypen werden gespeichert:</p>`;
+    html += wizMacroBlock('Ruhetag 🛌', 'restFinal', d.restMacros, true);
+    html += wizMacroBlock('Durchschnittstag 📊', 'avgFinal', d.avgMacros, true);
+    if (d.sportMacros) {
+      html += wizMacroBlock('Sporttag 🏋️', 'sportFinal', d.sportMacros, true);
+    }
+    html += `
+      <div id="wizErr" class="error-msg" style="display:none;"></div>
+      <button class="btn btn-primary" onclick="wizSave()" style="margin-top:8px;">✓ Speichern</button>`;
+  }
+
+  c.innerHTML = html;
+}
+
+function wizMacroBlock(title, prefix, m, editableForSave=false) {
+  if (!m) return '';
+  const fields = [
+    {k:'kcal_target', l:'🔥 kcal'}, {k:'protein_g', l:'💪 Protein g'},
+    {k:'carb_g', l:'🍞 KH g'}, {k:'fat_g', l:'🥑 Fett g'}, {k:'fiber_g', l:'🌿 Ballaststoffe g'},
+  ];
+  return `
+    <div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:12px;">
+      <div style="font-weight:600;margin-bottom:8px;font-size:13px;">${title}</div>
+      ${fields.map(f=>`
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+          <div style="flex:1;font-size:12px;color:var(--text2);">${f.l}</div>
+          <input class="form-input" type="number" id="wiz_${prefix}_${f.k}" value="${m[f.k]||0}"
+            style="width:80px;flex:none;text-align:right;padding:6px 8px;font-size:13px;">
+        </div>`).join('')}
+    </div>`;
+}
+
+function wizReadMacroBlock(prefix) {
+  return {
+    kcal_target: parseFloat(wizVal('wiz_'+prefix+'_kcal_target'))||0,
+    protein_g: parseFloat(wizVal('wiz_'+prefix+'_protein_g'))||0,
+    carb_g: parseFloat(wizVal('wiz_'+prefix+'_carb_g'))||0,
+    fat_g: parseFloat(wizVal('wiz_'+prefix+'_fat_g'))||0,
+    fiber_g: parseFloat(wizVal('wiz_'+prefix+'_fiber_g'))||0,
+  };
+}
+
+function wizShowErr(msg) {
+  const el = document.getElementById('wizErr');
+  if (el) { el.textContent = msg; el.style.display = 'block'; }
+}
+
+function wizSubmitWearable() {
+  const rest = parseFloat(wizVal('wiz_restKcal')) || 0;
+  const avg = parseFloat(wizVal('wiz_avgKcal')) || 0;
+  if (!rest && !avg) { wizShowErr('Bitte mindestens einen Wert eingeben.'); return; }
+  wiz.data.restKcal = rest || Math.round(avg * 0.9);
+  wiz.data.avgKcal = avg || Math.round(rest / 0.9);
+  wiz.data.cameFrom = 'wearable_yes';
+  wizGo('profile');
+}
+
+function wizSubmitMifflin() {
+  const weight = parseFloat(wizVal('wiz_weight'));
+  const height = parseFloat(wizVal('wiz_height'));
+  const age = parseFloat(wizVal('wiz_age'));
+  const gender = wizVal('wiz_gender');
+  const pal = wizVal('wiz_pal');
+  if (!weight || !height || !age) { wizShowErr('Bitte Gewicht, Grösse und Alter angeben.'); return; }
+  const bmr = wizCalcBMR(weight, height, age, gender);
+  wiz.data.weight = weight; wiz.data.height = height; wiz.data.age = age;
+  wiz.data.gender = gender; wiz.data.pal = pal;
+  wiz.data.avgKcal = Math.round(bmr * parseFloat(pal));
+  wiz.data.restKcal = Math.round(bmr * 1.2);
+  wiz.data.cameFrom = 'mifflin_form';
+  wizGo('profile');
+}
+
+function wizSubmitManual() {
+  const kcal = parseFloat(wizVal('wiz_manualKcal'));
+  if (!kcal) { wizShowErr('Bitte einen Kalorienwert eingeben.'); return; }
+  wiz.data.avgKcal = kcal;
+  wiz.data.restKcal = Math.round(kcal * 0.9);
+  wiz.data.cameFrom = 'manual_kcal';
+  wizGo('profile');
+}
+
+function wizSubmitProfile() {
+  const weight = parseFloat(wizVal('wiz_weight2')) || wiz.data.weight;
+  const age = parseFloat(wizVal('wiz_age2')) || wiz.data.age;
+  const gender = wizVal('wiz_gender2') || wiz.data.gender || 'w';
+  const pal = wizVal('wiz_pal2') || wiz.data.pal || '1.375';
+  if (!weight || !age) { wizShowErr('Bitte Gewicht und Alter angeben.'); return; }
+  wiz.data.weight = weight; wiz.data.age = age; wiz.data.gender = gender; wiz.data.pal = pal;
+
+  wiz.data.restMacros = wizComputeMacros(wiz.data.restKcal, weight, parseFloat(pal));
+  wiz.data.avgMacros = wizComputeMacros(wiz.data.avgKcal, weight, parseFloat(pal));
+  wizGo('macros_review');
+}
+
+function wizSubmitMacrosReview() {
+  wiz.data.restMacros = wizReadMacroBlock('rest');
+  wiz.data.avgMacros = wizReadMacroBlock('avg');
+  wizGo('health');
+}
+
+function wizSubmitHealth() {
+  const diabetes = document.getElementById('wiz_diabetes').checked;
+  const ironDeficiency = document.getElementById('wiz_iron').checked;
+  const otherNotes = wizVal('wiz_otherNote');
+  wiz.data.diabetes = diabetes;
+  wiz.data.ironDeficiency = ironDeficiency;
+  wiz.data.otherNotes = otherNotes;
+
+  const gi = diabetes ? 45 : 55;
+  const gl = diabetes ? 70 : 100;
+  const sugarPct = diabetes ? 0.05 : 0.10;
+  const iron = wizIronTarget(wiz.data.gender, wiz.data.age, ironDeficiency);
+
+  [wiz.data.restMacros, wiz.data.avgMacros].forEach(m => {
+    m.gi_avg_target = gi;
+    m.gl_daily_target = gl;
+    m.zucker_g = Math.round(m.kcal_target * sugarPct / 4);
+    m.iron_mg = iron;
+  });
+
+  wizGo('sport_ask');
+}
+
+function wizBuildSportMacros(extraKcal, type) {
+  const split = WIZ_SPORT_SPLIT[type];
+  const avg = wiz.data.avgMacros;
+  const extraP = Math.round(extraKcal * split.p / 4);
+  const extraC = Math.round(extraKcal * split.c / 4);
+  const extraF = Math.round(extraKcal * split.f / 9);
+  const kcal = Math.round(avg.kcal_target + extraKcal);
+  return {
+    kcal_target: kcal,
+    protein_g: avg.protein_g + extraP,
+    carb_g: avg.carb_g + extraC,
+    fat_g: avg.fat_g + extraF,
+    fiber_g: Math.round(kcal / 1000 * 14),
+    gi_avg_target: avg.gi_avg_target,
+    gl_daily_target: avg.gl_daily_target,
+    zucker_g: avg.zucker_g,
+    iron_mg: avg.iron_mg,
+  };
+}
+
+function wizSubmitSportManual() {
+  const kcal = parseFloat(wizVal('wiz_sportKcal'));
+  const type = wizVal('wiz_sportType');
+  if (!kcal) { wizShowErr('Bitte einen Kalorienwert eingeben.'); return; }
+  wiz.data.sportType = type;
+  wiz.data.sportMacros = wizBuildSportMacros(kcal, type);
+  wizGo('summary');
+}
+
+function wizSubmitSportEstimate() {
+  const type = wizVal('wiz_sportType2');
+  const duration = parseFloat(wizVal('wiz_sportDuration'));
+  const kcal = Math.round(WIZ_SPORT_KCAL_PER_H[type] * (duration / 60));
+  wiz.data.sportType = type;
+  wiz.data.sportDuration = String(duration);
+  wiz.data.sportMacros = wizBuildSportMacros(kcal, type);
+  wizGo('summary');
+}
+
+async function wizSaveTarget(name, macros) {
+  const sheetId = SHEETS.targets !== SHEETS_BASE.targets ? SHEETS.targets : '';
+  const existing = state.targets.find(t => t.date === name);
+  if (existing) {
+    await fetch(APPS_SCRIPT_URL, {
+      method: 'POST', mode: 'no-cors',
+      headers: {'Content-Type':'text/plain'},
+      body: JSON.stringify({ action: 'updateTarget', dayType: name, fields: macros, sheetId: sheetId || undefined })
+    });
+    Object.assign(existing, macros);
+  } else {
+    if (state.targets.length >= 5) {
+      throw new Error(`Maximal 5 Tagestypen erlaubt – bitte zuerst einen löschen, um "${name}" zu erstellen.`);
+    }
+    const template = state.targets[0] || {};
+    const full = { ...template, ...macros, date: name };
+    const row = Object.values(full);
+    await fetch(APPS_SCRIPT_URL, {
+      method: 'POST', mode: 'no-cors',
+      headers: {'Content-Type':'text/plain'},
+      body: JSON.stringify({ action: 'addTarget', row, sheetId: sheetId || undefined })
+    });
+    state.targets.push(full);
+  }
+}
+
+async function wizSave() {
+  const rest = wizReadMacroBlock('restFinal');
+  const avg = wizReadMacroBlock('avgFinal');
+  const sport = wiz.data.sportMacros ? wizReadMacroBlock('sportFinal') : null;
+  Object.assign(rest, { gi_avg_target: wiz.data.restMacros.gi_avg_target, gl_daily_target: wiz.data.restMacros.gl_daily_target, zucker_g: wiz.data.restMacros.zucker_g, iron_mg: wiz.data.restMacros.iron_mg });
+  Object.assign(avg, { gi_avg_target: wiz.data.avgMacros.gi_avg_target, gl_daily_target: wiz.data.avgMacros.gl_daily_target, zucker_g: wiz.data.avgMacros.zucker_g, iron_mg: wiz.data.avgMacros.iron_mg });
+  if (sport) Object.assign(sport, { gi_avg_target: wiz.data.sportMacros.gi_avg_target, gl_daily_target: wiz.data.sportMacros.gl_daily_target, zucker_g: wiz.data.sportMacros.zucker_g, iron_mg: wiz.data.sportMacros.iron_mg });
+
+  try {
+    await wizSaveTarget('Ruhetag', rest);
+    await wizSaveTarget('Durchschnittstag', avg);
+    if (sport) await wizSaveTarget('Sporttag', sport);
+    closeAssistant();
+    state.dayType = 'Durchschnittstag';
+    renderToday();
+    alert('✓ Tagesziele gespeichert!');
+  } catch (e) {
+    wizShowErr(e.message);
   }
 }
 
@@ -3962,6 +4467,16 @@ loadLayout();
     <div class="modal-title">🎯 Ziele: <span id="tageszieleName"></span></div>
     <div id="tagesziele_fields"></div>
     <button class="btn btn-primary" onclick="saveTagesziele()" style="margin-top:8px;">Speichern ✓</button>
+  </div>
+</div>
+
+<!-- Modal: Ziel-Assistent -->
+<div class="modal-overlay" id="assistantModal">
+  <div class="modal" style="position:relative;max-height:90vh;overflow-y:auto;">
+    <div class="modal-handle"></div>
+    <button class="modal-close" onclick="closeAssistant()">✕</button>
+    <div class="modal-title">🧭 Ziel-Assistent</div>
+    <div id="assistantContent"></div>
   </div>
 </div>
 
