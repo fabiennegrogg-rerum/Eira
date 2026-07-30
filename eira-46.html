@@ -698,8 +698,9 @@
           <div style="font-size:12px;color:var(--text2);margin-top:4px;" id="selectedFoodMacros"></div>
         </div>
         <div class="form-group">
-          <label class="form-label">Menge (g)</label>
+          <label class="form-label" id="logFoodGramsLabel">Menge (g)</label>
           <input class="form-input" type="number" id="logFoodGrams" placeholder="100" value="100" oninput="updateFoodPreview()">
+          <div id="logFoodGramsApprox" style="font-size:11px;color:var(--text2);margin-top:4px;display:none;"></div>
           <div id="portionHint" style="font-size:11px;color:var(--text2);margin-top:4px;"></div>
         </div>
         <div id="foodPreview" style="font-size:13px;color:var(--text2);margin-bottom:14px;"></div>
@@ -939,6 +940,19 @@ async function fetchSheet(sheetId, tabName=null) {
     } catch(e) { continue; }
   }
   throw new Error('Sheet nicht erreichbar: ' + sheetId);
+}
+
+function lockSaveBtn(btn, busyText) {
+  if (!btn || btn.disabled) return false;
+  btn.dataset.origText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = busyText || 'Speichert...';
+  return true;
+}
+function unlockSaveBtn(btn) {
+  if (!btn) return;
+  btn.disabled = false;
+  if (btn.dataset.origText) btn.textContent = btn.dataset.origText;
 }
 
 async function appendRow(sheetId, values) {
@@ -1597,7 +1611,7 @@ function showRecipeDetail(recipeId) {
       <textarea id="ratingComment_${recipeId}" placeholder="Kommentar / Tipp (optional)" 
         style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--text);font-size:13px;resize:vertical;min-height:60px;">${userRating?.comment||''}</textarea>
       <div style="display:flex;gap:8px;margin-top:8px;">
-        <button onclick="saveRating('${recipeId}')" style="background:var(--accent);color:#0f0f0e;border:none;border-radius:8px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer;">Bewertung speichern</button>
+        <button onclick="saveRating('${recipeId}', this)" style="background:var(--accent);color:#0f0f0e;border:none;border-radius:8px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer;">Bewertung speichern</button>
         <button onclick="toggleFavourite('${recipeId}')" style="background:${userRating?.is_favourite==='TRUE'?'rgba(245,200,122,0.2)':'var(--surface)'};border:1px solid ${userRating?.is_favourite==='TRUE'?'var(--accent2)':'var(--border)'};border-radius:8px;padding:8px 14px;font-size:14px;cursor:pointer;">${userRating?.is_favourite==='TRUE'?'❤️ Favorit':'🤍 Favorit'}</button>
       </div>
     </div>
@@ -1624,7 +1638,8 @@ function showRecipeDetail(recipeId) {
   openModal('recipeDetailModal');
 }
 
-async function saveRating(recipeId) {
+async function saveRating(recipeId, btn) {
+  if (!lockSaveBtn(btn)) return;
   const stars = document.querySelectorAll(`[onclick^="setRating('${recipeId}"]`);
   let rating = 0;
   stars.forEach((s,i) => { if (s.style.color === 'rgb(245, 200, 122)') rating = i+1; });
@@ -1662,7 +1677,10 @@ async function saveRating(recipeId) {
     }
     showRecipeDetail(recipeId);
     renderRecipes();
-  } catch(e) { alert('Fehler: ' + e.message); }
+  } catch(e) {
+    alert('Fehler: ' + e.message);
+    unlockSaveBtn(btn);
+  }
 }
 
 let _pendingRating = {};
@@ -1793,30 +1811,61 @@ function selectLogFood(foodId) {
   document.getElementById('selectedFoodName').textContent = food.name;
   document.getElementById('selectedFoodMacros').textContent =
     `P: ${food.protein_g||0}g · KH: ${food.carb_g||0}g · F: ${food.fat_g||0}g · Balaststoffe: ${food.fiber_g||0}g (pro 100g)`;
-  const defaultPortion = food.portion_def || food.portion_default || food.default_serv || 100;
-  document.getElementById('logFoodGrams').value = defaultPortion;
-  // Show portion hint
-  const min = food.portion_min || '';
-  const max = food.portion_max || '';
+
+  const isStueck = food.unit_type === 'Stück';
+  const gramsPerPiece = parseFloat(food.portion_g) || 100;
+  const label = document.getElementById('logFoodGramsLabel');
+  const input = document.getElementById('logFoodGrams');
   const hint = document.getElementById('portionHint');
-  if (hint) {
-    let hintText = `Standard: ${defaultPortion}g`;
-    if (min && max) hintText += ` · Min: ${min}g · Max: ${max}g`;
-    hint.textContent = hintText;
+
+  if (isStueck) {
+    label.textContent = 'Anzahl Stück';
+    input.value = 1;
+    input.step = '0.5';
+    if (hint) hint.textContent = `≈ ${gramsPerPiece}g pro Stück`;
+  } else {
+    label.textContent = 'Menge (g)';
+    const defaultPortion = food.portion_g || food.portion_def || food.portion_default || food.default_serv || 100;
+    input.value = defaultPortion;
+    input.step = '1';
+    if (hint) hint.textContent = `Standard: ${defaultPortion}g`;
   }
+
   document.getElementById('logFoodSelected').style.display = 'block';
   updateFoodPreview();
 }
 
+// Liefert die tatsächliche Grammzahl für das aktuell gewählte Food im Add-Log-Modal.
+// Bei unit_type==='Stück' wird der eingegebene Wert als Anzahl Stück interpretiert
+// und mit food.portion_g (Gramm pro Stück) multipliziert.
+function getLogFoodGrams() {
+  const f = state.selectedFood;
+  const val = parseFloat(document.getElementById('logFoodGrams').value) || 0;
+  if (f && f.unit_type === 'Stück') {
+    const gramsPerPiece = parseFloat(f.portion_g) || 100;
+    return Math.round(val * gramsPerPiece * 10) / 10;
+  }
+  return val || 100;
+}
+
 function updateFoodPreview() {
   if (!state.selectedFood) return;
-  const g = parseFloat(document.getElementById('logFoodGrams').value) || 100;
+  const g = getLogFoodGrams();
   const f = state.selectedFood;
   const factor = g / 100;
   const fiber = ((parseFloat(f.fiber_g)||0) * factor).toFixed(1);
   const protein = ((parseFloat(f.protein_g)||0) * factor).toFixed(1);
   document.getElementById('foodPreview').innerHTML =
     `→ <span style="color:var(--accent)">${fiber}g Ballaststoffe</span> · ${protein}g Protein bei ${g}g`;
+  const approxEl = document.getElementById('logFoodGramsApprox');
+  if (approxEl) {
+    if (f.unit_type === 'Stück') {
+      approxEl.style.display = 'block';
+      approxEl.textContent = `≈ ${g}g`;
+    } else {
+      approxEl.style.display = 'none';
+    }
+  }
 }
 
 function searchLogRecipe(q) {
@@ -1843,7 +1892,9 @@ function selectLogRecipe(recipeId) {
 
 async function saveLogEntry() {
   if (!state.selectedFood) return;
-  const grams = parseFloat(document.getElementById('logFoodGrams').value) || 100;
+  const btn = document.querySelector('#logFoodSelected .btn-primary');
+  if (!lockSaveBtn(btn)) return;
+  const grams = getLogFoodGrams();
   const logId = 'LG-' + Date.now().toString(36);
   const now = new Date();
   const timeStr = now.toTimeString().slice(0,8);
@@ -1859,11 +1910,15 @@ async function saveLogEntry() {
     renderLogPage();
   } catch(e) {
     alert('Fehler beim Speichern: ' + e.message);
+  } finally {
+    unlockSaveBtn(btn);
   }
 }
 
 async function saveRecipeLogEntry() {
   if (!state.selectedRecipe) return;
+  const btn = document.querySelector('#logRecipeSelected .btn-primary');
+  if (!lockSaveBtn(btn)) return;
   const servings = parseFloat(document.getElementById('logRecipeServings').value) || 1;
   const logId = 'LG-' + Date.now().toString(36);
   const now = new Date();
@@ -1880,6 +1935,8 @@ async function saveRecipeLogEntry() {
     renderLogPage();
   } catch(e) {
     alert('Fehler beim Speichern: ' + e.message);
+  } finally {
+    unlockSaveBtn(btn);
   }
 }
 
@@ -1978,6 +2035,8 @@ function generateFoodId() {
 async function saveNewFood() {
   const name = document.getElementById('newFoodName').value.trim();
   if (!name) { showError('addFoodError', 'Bitte einen Namen eingeben'); return; }
+  const btn = document.querySelector('#addFoodModal .btn-primary');
+  if (!lockSaveBtn(btn)) return;
   const unit = document.querySelector('#unitChips .chip.selected')?.textContent || 'g';
   const id = generateFoodId();
   const row = [
@@ -2029,6 +2088,8 @@ async function saveNewFood() {
     const nfz = document.getElementById('nf_zucker'); if(nfz) nfz.value = '';
   } catch(e) {
     showError('addFoodError', 'Fehler: ' + e.message);
+  } finally {
+    unlockSaveBtn(btn);
   }
 }
 
@@ -2352,11 +2413,28 @@ function showEditFoodModal(foodId) {
   for (let i = 0; i < catSelect.options.length; i++) {
     if (catSelect.options[i].value === food.category) { catSelect.selectedIndex = i; break; }
   }
+  // Einheit-Chip setzen (g/ml/Stück)
+  const unitVal = food.unit_type || 'g';
+  document.querySelectorAll('#editUnitChips .chip').forEach(c => {
+    c.classList.toggle('selected', c.textContent === unitVal);
+  });
+  updateEditPortionLabel();
   openModal('editFoodModal');
+}
+
+// Passt das Label des "Std. Portion"-Feldes je nach gewählter Einheit an
+// (Stück -> "Gramm pro Stück", sonst -> "Std. Portion (g)")
+function updateEditPortionLabel() {
+  const selected = document.querySelector('#editUnitChips .chip.selected')?.textContent || 'g';
+  const label = document.getElementById('editFoodPortionLabel');
+  if (!label) return;
+  label.textContent = selected === 'Stück' ? 'Gramm pro Stück' : 'Std. Portion (g)';
 }
 
 async function saveEditFood() {
   const foodId = document.getElementById('editFoodId').value;
+  const btn = document.querySelector('#editFoodModal .btn-primary');
+  if (!lockSaveBtn(btn)) return;
   const fields = {
     name: document.getElementById('editFoodName').value,
     category: document.getElementById('editFoodCategory').value,
@@ -2387,6 +2465,7 @@ async function saveEditFood() {
     gl: document.getElementById('editFoodGL').value,
     iron_type: document.getElementById('editFoodIronType').value,
     portion_g: document.getElementById('editFoodPortion').value,
+    unit_type: document.querySelector('#editUnitChips .chip.selected')?.textContent || 'g',
   };
   try {
     await fetch(APPS_SCRIPT_URL, {
@@ -2403,6 +2482,8 @@ async function saveEditFood() {
     renderFoods();
   } catch(e) {
     alert('Fehler: ' + e.message);
+  } finally {
+    unlockSaveBtn(btn);
   }
 }
 
@@ -2479,6 +2560,8 @@ function searchEditIngredient(q) {
 
 async function saveEditRecipe() {
   const recipeId = document.getElementById('editRecipeId').value;
+  const btn = document.querySelector('#editRecipeModal .btn-primary');
+  if (!lockSaveBtn(btn)) return;
   const fields = {
     name: document.getElementById('editRecipeName').value,
     serving_yield: document.getElementById('editRecipeServings').value,
@@ -2508,6 +2591,8 @@ async function saveEditRecipe() {
     renderRecipes();
   } catch(e) {
     alert('Fehler: ' + e.message);
+  } finally {
+    unlockSaveBtn(btn);
   }
 }
 
@@ -3205,7 +3290,7 @@ async function saveMealprepWizard() {
       `⚠️ Achtung: ${checkedCount + mp.gifted} Portionen verplant, aber nur ${mp.portions} gekocht. Wird trotzdem gespeichert.`;
   }
   const btn = document.querySelector('#mealprepModal .btn-primary');
-  if (btn) { btn.disabled = true; btn.textContent = 'Speichern...'; }
+  if (!lockSaveBtn(btn)) return;
 
   try {
     // 1) Kochtermin anlegen
@@ -3266,7 +3351,7 @@ async function saveMealprepWizard() {
     document.getElementById('mealprepWizardError').style.display = 'block';
     document.getElementById('mealprepWizardError').textContent = 'Fehler: ' + e.message;
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = 'Speichern ✓'; }
+    unlockSaveBtn(btn);
   }
 }
 
@@ -3726,6 +3811,10 @@ async function deleteTarget() {
 }
 
 async function saveTagesziele() {
+  const btns = Array.from(document.querySelectorAll('#tageszielModal .btn-primary'));
+  const firstBtn = btns[0];
+  if (firstBtn && firstBtn.disabled) return;
+  btns.forEach(b => lockSaveBtn(b));
   const target = getTodayTarget();
   const fields = ['kcal_target','protein_g','carb_g','fat_g','fiber_g','zucker_g',
     'gi_avg_target','gl_daily_target','vitamin_c_mg','vitamin_a_rae_ug','vitamin_d_iu',
@@ -3754,6 +3843,8 @@ async function saveTagesziele() {
     alert('✓ Ziele gespeichert!');
   } catch(e) {
     alert('Fehler: ' + e.message);
+  } finally {
+    btns.forEach(b => unlockSaveBtn(b));
   }
 }
 
@@ -4057,7 +4148,7 @@ function renderAssistant() {
     }
     html += `
       <div id="wizErr" class="error-msg" style="display:none;"></div>
-      <button class="btn btn-primary" onclick="wizSave()" style="margin-top:8px;">✓ Speichern</button>`;
+      <button class="btn btn-primary" onclick="wizSave(this)" style="margin-top:8px;">✓ Speichern</button>`;
   }
 
   c.innerHTML = html;
@@ -4238,7 +4329,8 @@ async function wizSaveTarget(name, macros) {
   }
 }
 
-async function wizSave() {
+async function wizSave(btn) {
+  if (!lockSaveBtn(btn)) return;
   const rest = wizReadMacroBlock('restFinal');
   const avg = wizReadMacroBlock('avgFinal');
   const sport = wiz.data.sportMacros ? wizReadMacroBlock('sportFinal') : null;
@@ -4256,6 +4348,7 @@ async function wizSave() {
     alert('✓ Tagesziele gespeichert!');
   } catch (e) {
     wizShowErr(e.message);
+    unlockSaveBtn(btn);
   }
 }
 
@@ -4428,8 +4521,16 @@ loadLayout();
         <option value="non-haem">Nicht-Häm-Eisen (Pflanzen, Eier, Milch)</option>
       </select>
     </div>
+    <div class="form-group">
+      <label class="form-label">Einheit</label>
+      <div class="chips" id="editUnitChips">
+        <div class="chip selected" onclick="selectChip(this,'editUnit');updateEditPortionLabel();">g</div>
+        <div class="chip" onclick="selectChip(this,'editUnit');updateEditPortionLabel();">ml</div>
+        <div class="chip" onclick="selectChip(this,'editUnit');updateEditPortionLabel();">Stück</div>
+      </div>
+    </div>
     <div class="row">
-      <div class="form-group"><label class="form-label">Std. Portion (g)</label><input class="form-input" id="editFoodPortion" type="number"></div>
+      <div class="form-group"><label class="form-label" id="editFoodPortionLabel">Std. Portion (g)</label><input class="form-input" id="editFoodPortion" type="number"></div>
       <div class="form-group"><label class="form-label">Dichte (g/ml)</label><input class="form-input" id="editFoodDensity" type="number" step="0.01" placeholder="nur für Flüssigkeiten"></div>
     </div>
     <input type="hidden" id="editFoodId">
